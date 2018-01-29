@@ -265,3 +265,93 @@ class DjangoSearchBackend(SearchBackend):
         queryset = queryset.order_by(sort_clause)
         paginator = paginator_cls(queryset, sort_clause, **paginator_options)
         return paginator.get_result(limit, cursor, count_hits=count_hits)
+
+
+class EnvironmentDjangoSearchBackend(SearchBackend):
+    def query(self,
+              project,
+              query=None,
+              status=None,
+              tags=None,
+              bookmarked_by=None,
+              assigned_to=None,
+              sort_by='date',
+              unassigned=None,
+              subscribed_by=None,
+              age_from=None,
+              age_from_inclusive=True,
+              age_to=None,
+              age_to_inclusive=True,
+              last_seen_from=None,
+              last_seen_from_inclusive=True,
+              last_seen_to=None,
+              last_seen_to_inclusive=True,
+              date_from=None,
+              date_from_inclusive=True,
+              date_to=None,
+              date_to_inclusive=True,
+              active_at_from=None,
+              active_at_from_inclusive=True,
+              active_at_to=None,
+              active_at_to_inclusive=True,
+              times_seen=None,
+              times_seen_lower=None,
+              times_seen_lower_inclusive=True,
+              times_seen_upper=None,
+              times_seen_upper_inclusive=True,
+              count_hits=False,
+              paginator_options=None,
+              cursor=None,
+              limit=None,
+              environment_id=None,
+              ):
+        assert environment_id is not None  # TODO: This would need to support the None case.
+
+        raise NotImplementedError
+
+    def find_candidates(self,
+                        project,
+                        environment_id,
+                        query=None,
+                        status=None,
+                        bookmarked_by=None,
+                        assigned_to=None,
+                        first_release=None,  # not sure if this is the right spot
+                        unassigned=None,
+                        subscribed_by=None,
+                        ):
+        # This is all data from the `default` environment. It should return a
+        # set of group IDs (unsorted.)
+
+        # This could also utilize some of the scalar attributes from
+        # `find_candidates` to rule out entries that are impossible based on
+        # aggregate attributes (e.g. an issue cannot be seen in an environment
+        # after the issue's last seen timestamp.)
+
+        raise NotImplementedError
+
+    def filter_candidates(self,
+                          project,
+                          environment_id,
+                          candidates,
+                          tags=None,
+                          age_from=None, age_from_inclusive=True,
+                          age_to=None, age_to_inclusive=True,
+                          last_seen_from=None, last_seen_from_inclusive=True,
+                          last_seen_to=None, last_seen_to_inclusive=True,
+                          date_from=None, date_from_inclusive=True,
+                          date_to=None, date_to_inclusive=True,
+                          active_at_from=None, active_at_from_inclusive=True,
+                          active_at_to=None, active_at_to_inclusive=True,
+                          times_seen=None,
+                          times_seen_lower=None, times_seen_lower_inclusive=True,
+                          times_seen_upper=None, times_seen_upper_inclusive=True,
+                          sort_by='date',
+                          ):
+        # This is all data from `grouptags` database.  It should return a list
+        # of group IDs (sorted.)
+
+        # TODO: The paginator logic should happen in this method as well (since
+        # this is where the sort/limit/offset occurs.)
+
+        raise NotImplementedError
