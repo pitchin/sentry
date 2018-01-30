@@ -412,7 +412,59 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # This is all data from `grouptags` database.  It should return a list
         # of group IDs (sorted.)
 
-        # TODO: The paginator logic should happen in this method as well (since
-        # this is where the sort/limit/offset occurs.)
+        # TODO(tkaemming): This shouldn't be implemented like this, since this
+        # is an abstraction leak from tagstore, but it's good enough to prove
+        # the point for now.
+        from sentry.tagstore.models import GroupTagValue
+
+        queryset = GroupTagValue.objects.filter(
+            project_id=project.id,
+            key='environment',
+            value=tags.pop('environment'),
+            group_id__in=candidates,
+        )
+
+        if age_from is not None:
+            raise NotImplementedError
+
+        if age_to is not None:
+            raise NotImplementedError
+
+        if last_seen_from is not None:
+            raise NotImplementedError
+
+        if last_seen_to is not None:
+            raise NotImplementedError
+
+        if date_from is not None:
+            raise NotImplementedError
+
+        if date_to is not None:
+            raise NotImplementedError
+
+        if active_at_from is not None:
+            raise NotImplementedError
+
+        if active_at_to is not None:
+            raise NotImplementedError
+
+        if times_seen is not None:
+            raise NotImplementedError
+
+        if times_seen_lower is not None:
+            raise NotImplementedError
+
+        if times_seen_upper is not None:
+            raise NotImplementedError
+
+        # TODO(tkaemming): Implement sort options.
+
+        # TODO(tkaemming): Implement paginator functionality.
+
+        # TODO(tkaemming): Filter on the remaining tags. For PostgreSQL, we can
+        # implement this as a CTE with lateral JOIN from the existing queryset
+        # (if we can get the raw SQL from the existing queryset?) For other
+        # databases, we can fall back to an iterative reduction of the results
+        # from the previous query.
 
         raise NotImplementedError
