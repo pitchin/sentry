@@ -316,19 +316,80 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         status=None,
                         bookmarked_by=None,
                         assigned_to=None,
-                        first_release=None,  # not sure if this is the right spot
                         unassigned=None,
                         subscribed_by=None,
+                        first_release=None,
                         ):
         # This is all data from the `default` environment. It should return a
         # set of group IDs (unsorted.)
 
-        # This could also utilize some of the scalar attributes from
-        # `find_candidates` to rule out entries that are impossible based on
-        # aggregate attributes (e.g. an issue cannot be seen in an environment
-        # after the issue's last seen timestamp.)
+        from sentry.models import Group, GroupSubscription, GroupStatus
 
-        raise NotImplementedError
+        queryset = Group.objects.filter(project=project)
+
+        if query:
+            # TODO(dcramer): if we want to continue to support search on SQL
+            # we should at least optimize this in Postgres so that it does
+            # the query filter **after** the index filters, and restricts the
+            # result set
+            # XXX(tkaemming): This is not environment-aware
+            queryset = queryset.filter(Q(message__icontains=query) | Q(culprit__icontains=query))
+
+        if status is None:
+            queryset = queryset.exclude(status__in=[
+                GroupStatus.PENDING_DELETION,
+                GroupStatus.DELETION_IN_PROGRESS,
+                GroupStatus.PENDING_MERGE,
+            ])
+        else:
+            queryset = queryset.filter(status=status)
+
+        if bookmarked_by:
+            queryset = queryset.filter(
+                bookmark_set__project=project,
+                bookmark_set__user=bookmarked_by,
+            )
+
+        if assigned_to is not None:
+            assert unassigned is None
+            queryset = queryset.filter(
+                assignee_set__project=project,
+                assignee_set__user=assigned_to,
+            )
+
+        if unassigned is not None:
+            assert assigned_to is None
+            queryset = queryset.filter(
+                assignee_set__isnull=unassigned,
+            )
+
+        if subscribed_by is not None:
+            queryset = queryset.filter(
+                id__in=GroupSubscription.objects.filter(
+                    project=project,
+                    user=subscribed_by,
+                    is_active=True,
+                ).values_list('group'),
+            )
+
+        # TODO(tkaemming): Restrict the query to only those that have an
+        # associated `GroupEnvironment` record (and limit to the first release,
+        # if one is provided.) This could be done as a subquery, but preferably
+        # it's done as a join against the `GroupEnvironment` table. This means
+        # figuring out how to implement an ORM field that acts as a foreign key
+        # for JOIN purposes, but isn't actually implemented as a foreign key
+        # column under the hood.
+        if first_release is not None:
+            raise NotImplementedError
+
+        # TODO(tkaemming): This shoould also utilize some of the scalar
+        # attributes from `find_candidates` to rule out entries that are
+        # impossible based on aggregate attributes (e.g. an issue cannot be
+        # seen in an environment after the issue's last seen timestamp.)
+
+        # TODO(tkaemming): This queryset should probably have a limit
+        # associated with it?
+        return set(queryset.values_list('id', flat=True))
 
     def filter_candidates(self,
                           project,
