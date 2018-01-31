@@ -8,6 +8,8 @@ sentry.search.django.backend
 
 from __future__ import absolute_import
 
+import itertools
+
 from django.db import router
 from django.db.models import Q
 
@@ -464,6 +466,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # the point for now.
 
         from django.db import connections
+        from sentry.search.base import ANY
         from sentry.tagstore.models import GroupTagValue
         from sentry.utils.db import is_postgres
 
@@ -534,17 +537,46 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 'group_id', 'sort_key').query.get_compiler(
                 connection=connection).as_nested_sql()
 
+            join_conditions = []
+            where_conditions = []
+            parameters = list(parameters)
+
+            current_table_alias = 'candidates'
+            join_sequence = itertools.count()
+            while tags:
+                key, value = tags.popitem()
+                if value is ANY:
+                    raise NotImplementedError
+
+                previous_table_alias = current_table_alias
+                current_table_alias = 'grouptagvalue_{}'.format(next(join_sequence))
+                join_conditions.append(
+                    'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
+                        table=GroupTagValue._meta.db_table,
+                        alias=current_table_alias,
+                        previous_alias=previous_table_alias,
+                    )
+                )
+                where_conditions.append(
+                    '({alias}.key = %s AND {alias}.value = %s)'.format(
+                        alias=current_table_alias))
+                parameters.extend([key, value])
+
             # TODO(tkaemming): Build the rest of the query here.
             query = u"""\
                 WITH candidates AS ({candidate_query})
                 SELECT candidates.group_id FROM candidates
                 {join_conditions}
                 {lateral_queries}
+                {where_clause}
                 ORDER BY candidates.sort_key DESC;
             """.format(
                 candidate_query=candidate_query,
-                join_conditions='',
+                join_conditions=' '.join(join_conditions),
                 lateral_queries='',
+                where_clause='WHERE {conditions}'.format(
+                    conditions=' AND '.join(where_conditions),
+                ) if where_conditions else '',
             )
 
             cursor = connection.cursor()
