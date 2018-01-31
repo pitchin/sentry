@@ -585,7 +585,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 SELECT candidates.group_id
                 FROM {from_items}
                 {where_clause}
-                ORDER BY candidates.sort_key DESC;
+                ORDER BY candidates.sort_key {sort_order};
             """).format(
                 candidate_query=candidate_query,
                 from_items=',\n  '.join(  # XXX: I don't understand why this isn't as documented
@@ -594,6 +594,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 where_clause='WHERE {conditions}'.format(
                     conditions='\n  AND '.join(where_conditions),
                 ) if where_conditions else '',
+                sort_order='DESC',
             )
 
             cursor = connection.cursor()
