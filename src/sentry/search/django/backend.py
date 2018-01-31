@@ -546,21 +546,21 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             while tags:
                 key, value = tags.popitem()
                 if value is ANY:
-                    raise NotImplementedError
-
-                previous_table_alias = current_table_alias
-                current_table_alias = 'grouptagvalue_{}'.format(next(join_sequence))
-                join_conditions.append(
-                    'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
-                        table=GroupTagValue._meta.db_table,
-                        alias=current_table_alias,
-                        previous_alias=previous_table_alias,
+                    raise NotImplementedError  # TODO: Implement as a lateral query
+                else:
+                    previous_table_alias = current_table_alias
+                    current_table_alias = 'grouptagvalue_{}'.format(next(join_sequence))
+                    join_conditions.append(
+                        'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
+                            table=GroupTagValue._meta.db_table,
+                            alias=current_table_alias,
+                            previous_alias=previous_table_alias,
+                        )
                     )
-                )
-                where_conditions.append(
-                    '({alias}.key = %s AND {alias}.value = %s)'.format(
-                        alias=current_table_alias))
-                parameters.extend([key, value])
+                    where_conditions.append(
+                        '({alias}.key = %s AND {alias}.value = %s)'.format(
+                            alias=current_table_alias))
+                    parameters.extend([key, value])
 
             # TODO(tkaemming): Build the rest of the query here.
             query = u"""\
