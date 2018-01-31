@@ -406,7 +406,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
     def filter_candidates(self,
                           project,
                           environment_id,
-                          candidates,
+                          candidates=None,
                           tags=None,
                           age_from=None, age_from_inclusive=True,
                           age_to=None, age_to_inclusive=True,
@@ -443,8 +443,10 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             project_id=project.id,
             key='environment',
             value=tags.pop('environment'),
-            group_id__in=candidates,
         )
+
+        if candidates is not None:
+            queryset = queryset.filter(group_id__in=candidates)
 
         if age_from is not None:
             queryset = add_scalar_filter(queryset, 'first_seen', 'gt', age_from, age_from_inclusive)
