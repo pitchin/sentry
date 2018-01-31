@@ -307,6 +307,14 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               ):
         assert environment_id is not None  # TODO: This would need to support the None case.
 
+        # TODO(tkaemming): I don't know where this goes?
+
+        if date_from is not None:
+            raise NotImplementedError
+
+        if date_to is not None:
+            raise NotImplementedError
+
         raise NotImplementedError
 
     def find_candidates(self,
@@ -400,8 +408,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                           age_to=None, age_to_inclusive=True,
                           last_seen_from=None, last_seen_from_inclusive=True,
                           last_seen_to=None, last_seen_to_inclusive=True,
-                          date_from=None, date_from_inclusive=True,
-                          date_to=None, date_to_inclusive=True,
                           active_at_from=None, active_at_from_inclusive=True,
                           active_at_to=None, active_at_to_inclusive=True,
                           times_seen=None,
@@ -437,12 +443,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             raise NotImplementedError
 
         if last_seen_to is not None:
-            raise NotImplementedError
-
-        if date_from is not None:
-            raise NotImplementedError
-
-        if date_to is not None:
             raise NotImplementedError
 
         if active_at_from is not None:
