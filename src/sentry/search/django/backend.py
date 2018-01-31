@@ -267,6 +267,16 @@ class DjangoSearchBackend(SearchBackend):
         return paginator.get_result(limit, cursor, count_hits=count_hits)
 
 
+def add_scalar_filter(queryset, field, operator, value, inclusive):
+    return queryset.filter(**{
+        '{}__{}{}'.format(
+            field,
+            operator,
+            'e' if inclusive else ''
+        ): value,
+    })
+
+
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
@@ -326,6 +336,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         assigned_to=None,
                         unassigned=None,
                         subscribed_by=None,
+                        active_at_from=None, active_at_from_inclusive=True,
+                        active_at_to=None, active_at_to_inclusive=True,
                         first_release=None,
                         ):
         # This is all data from the `default` environment. It should return a
@@ -384,6 +396,25 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 ).values_list('group'),
             )
 
+        # TODO(tkaemming): I'm not sure if this is the right place for these
+        # checks but we don't track this on a per-environment basis and I'm not
+        # entirely sure it makes sense to...?
+        if active_at_from is not None:
+            queryset = add_scalar_filter(
+                queryset,
+                'active_at',
+                'gt',
+                active_at_from,
+                active_at_from_inclusive)
+
+        if active_at_to is not None:
+            queryset = add_scalar_filter(
+                queryset,
+                'active_at',
+                'lt',
+                active_at_to,
+                active_at_to_inclusive)
+
         # TODO(tkaemming): Restrict the query to only those that have an
         # associated `GroupEnvironment` record (and limit to the first release,
         # if one is provided.) This could be done as a subquery, but preferably
@@ -412,8 +443,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                           age_to=None, age_to_inclusive=True,
                           last_seen_from=None, last_seen_from_inclusive=True,
                           last_seen_to=None, last_seen_to_inclusive=True,
-                          active_at_from=None, active_at_from_inclusive=True,
-                          active_at_to=None, active_at_to_inclusive=True,
                           times_seen=None,
                           times_seen_lower=None, times_seen_lower_inclusive=True,
                           times_seen_upper=None, times_seen_upper_inclusive=True,
@@ -429,15 +458,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         from django.db import connections
         from sentry.tagstore.models import GroupTagValue
         from sentry.utils.db import is_postgres
-
-        def add_scalar_filter(queryset, field, operator, value, inclusive):
-            return queryset.filter(**{
-                '{}__{}{}'.format(
-                    field,
-                    operator,
-                    'e' if inclusive else ''
-                ): value,
-            })
 
         queryset = GroupTagValue.objects.filter(
             project_id=project.id,
@@ -469,12 +489,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 'lt',
                 last_seen_to,
                 last_seen_to_inclusive)
-
-        if active_at_from is not None:
-            raise NotImplementedError
-
-        if active_at_to is not None:
-            raise NotImplementedError
 
         if times_seen is not None:
             queryset = queryset.times_seen(times_seen=times_seen)
