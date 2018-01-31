@@ -415,7 +415,10 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # TODO(tkaemming): This shouldn't be implemented like this, since this
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
+
+        from django.db import connections
         from sentry.tagstore.models import GroupTagValue
+        from sentry.utils.db import is_postgres
 
         queryset = GroupTagValue.objects.filter(
             project_id=project.id,
@@ -457,14 +460,36 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         if times_seen_upper is not None:
             raise NotImplementedError
 
-        # TODO(tkaemming): Implement sort options.
+        # TODO(tkaemming): Implement actual sort options.
+        queryset = queryset.extra(select={'sort_key': 'times_seen'})
 
         # TODO(tkaemming): Implement paginator functionality.
 
-        # TODO(tkaemming): Filter on the remaining tags. For PostgreSQL, we can
-        # implement this as a CTE with lateral JOIN from the existing queryset
-        # (if we can get the raw SQL from the existing queryset?) For other
-        # databases, we can fall back to an iterative reduction of the results
-        # from the previous query.
+        # Filter on the remaining tags. For PostgreSQL, we can implement this
+        # as a CTE with lateral JOIN from the existing queryset (if we can get
+        # the raw SQL from the existing queryset?) For other databases, we can
+        # fall back to an iterative reduction of the results from the previous
+        # query.
+        if is_postgres():
+            connection = connections[router.db_for_read(GroupTagValue)]
+            candidate_query, parameters = queryset.values(
+                'group_id', 'sort_key').query.get_compiler(
+                connection=connection).as_nested_sql()
 
-        raise NotImplementedError
+            # TODO(tkaemming): Build the rest of the query here.
+            query = u"""\
+                WITH candidates AS ({})
+                SELECT candidates.group_id FROM candidates
+                ORDER BY candidates.sort_key DESC;
+            """.format(candidate_query)
+
+            cursor = connection.cursor()
+            cursor.execute(query, parameters)
+            candidates = map(
+                lambda (group_id,): int(group_id),
+                cursor,
+            )
+        else:
+            raise NotImplementedError
+
+        return candidates
