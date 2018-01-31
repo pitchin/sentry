@@ -426,6 +426,15 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         from sentry.tagstore.models import GroupTagValue
         from sentry.utils.db import is_postgres
 
+        def add_scalar_filter(queryset, field, operator, value, inclusive):
+            return queryset.filter(**{
+                '{}__{}{}'.format(
+                    field,
+                    operator,
+                    'e' if inclusive else ''
+                ): value,
+            })
+
         queryset = GroupTagValue.objects.filter(
             project_id=project.id,
             key='environment',
@@ -434,16 +443,26 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         )
 
         if age_from is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(queryset, 'first_seen', 'gt', age_from, age_from_inclusive)
 
         if age_to is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(queryset, 'first_seen', 'lt', age_to, age_to_inclusive)
 
         if last_seen_from is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(
+                queryset,
+                'last_seen',
+                'gt',
+                last_seen_from,
+                last_seen_from_inclusive)
 
         if last_seen_to is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(
+                queryset,
+                'last_seen',
+                'lt',
+                last_seen_to,
+                last_seen_to_inclusive)
 
         if active_at_from is not None:
             raise NotImplementedError
@@ -452,13 +471,23 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             raise NotImplementedError
 
         if times_seen is not None:
-            raise NotImplementedError
+            queryset = queryset.times_seen(times_seen=times_seen)
 
         if times_seen_lower is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(
+                queryset,
+                'times_seen',
+                'gt',
+                times_seen_lower,
+                times_seen_lower_inclusive)
 
         if times_seen_upper is not None:
-            raise NotImplementedError
+            queryset = add_scalar_filter(
+                queryset,
+                'times_seen',
+                'lt',
+                times_seen_upper,
+                times_seen_upper_inclusive)
 
         # TODO(tkaemming): Implement actual sort options.
         queryset = queryset.extra(select={'sort_key': 'times_seen'})
