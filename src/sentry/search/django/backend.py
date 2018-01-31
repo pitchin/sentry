@@ -277,6 +277,14 @@ def add_scalar_filter(queryset, field, operator, value, inclusive):
     })
 
 
+sort_strategies = {
+    'priority': 'log(times_seen) * 600 + last_seen::abstime::int',
+    'date': 'last_seen',
+    'new': 'first_seen',
+    'freq': 'times_seen',
+}
+
+
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
@@ -509,8 +517,9 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 times_seen_upper,
                 times_seen_upper_inclusive)
 
-        # TODO(tkaemming): Implement actual sort options.
-        queryset = queryset.extra(select={'sort_key': 'times_seen'})
+        queryset = queryset.extra(
+            select={'sort_key': sort_strategies[sort_by]}
+        )
 
         # TODO(tkaemming): Implement paginator functionality.
 
