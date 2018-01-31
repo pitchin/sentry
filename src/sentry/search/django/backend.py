@@ -538,42 +538,59 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 connection=connection).as_nested_sql()
 
             join_conditions = []
+            lateral_queries = []
             where_conditions = []
             parameters = list(parameters)
 
-            current_table_alias = 'candidates'
-            join_sequence = itertools.count()
-            while tags:
-                key, value = tags.popitem()
+            presence_tags = set()
+            specific_tags = {}
+
+            for key, value in tags.items():
                 if value is ANY:
-                    raise NotImplementedError  # TODO: Implement as a lateral query
+                    presence_tags.add(key)
                 else:
-                    previous_table_alias = current_table_alias
-                    current_table_alias = 'grouptagvalue_{}'.format(next(join_sequence))
-                    join_conditions.append(
-                        'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
-                            table=GroupTagValue._meta.db_table,
-                            alias=current_table_alias,
-                            previous_alias=previous_table_alias,
-                        )
+                    specific_tags[key] = value
+
+            current_table_alias = 'candidates'
+            lateral_alias_sequence = itertools.count()
+            join_alias_sequence = itertools.count()
+
+            for key in presence_tags:
+                lateral_queries.append(
+                    'LATERAL (SELECT * FROM {table} WHERE group_id = candidates.group_id AND key = %s LIMIT 1) as {alias}'.format(
+                        table=GroupTagValue._meta.db_table,
+                        alias='grouptagvalue_lateral_{}'.format(next(lateral_alias_sequence)),
                     )
-                    where_conditions.append(
-                        '({alias}.key = %s AND {alias}.value = %s)'.format(
-                            alias=current_table_alias))
-                    parameters.extend([key, value])
+                )
+                parameters.append(key)
+
+            for key, value in specific_tags.items():
+                previous_table_alias = current_table_alias
+                current_table_alias = 'grouptagvalue_join_{}'.format(next(join_alias_sequence))
+                join_conditions.append(
+                    'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
+                        table=GroupTagValue._meta.db_table,
+                        alias=current_table_alias,
+                        previous_alias=previous_table_alias,
+                    )
+                )
+                where_conditions.append(
+                    '({alias}.key = %s AND {alias}.value = %s)'.format(
+                        alias=current_table_alias))
+                parameters.extend([key, value])
 
             # TODO(tkaemming): Build the rest of the query here.
             query = u"""\
                 WITH candidates AS ({candidate_query})
-                SELECT candidates.group_id FROM candidates
-                {join_conditions}
-                {lateral_queries}
+                SELECT candidates.group_id
+                FROM {from_items}
                 {where_clause}
                 ORDER BY candidates.sort_key DESC;
             """.format(
                 candidate_query=candidate_query,
-                join_conditions=' '.join(join_conditions),
-                lateral_queries='',
+                from_items=',\n'.join(  # XXX: I don't understand why this isn't as documented
+                    ['\n'.join(['candidates'] + join_conditions)] + lateral_queries,
+                ),
                 where_clause='WHERE {conditions}'.format(
                     conditions=' AND '.join(where_conditions),
                 ) if where_conditions else '',
