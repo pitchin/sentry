@@ -9,6 +9,7 @@ sentry.search.django.backend
 from __future__ import absolute_import
 
 import itertools
+import textwrap
 
 from django.db import router
 from django.db.models import Q
@@ -579,20 +580,19 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         alias=current_table_alias))
                 parameters.extend([key, value])
 
-            # TODO(tkaemming): Build the rest of the query here.
-            query = u"""\
+            query = textwrap.dedent(u"""\
                 WITH candidates AS ({candidate_query})
                 SELECT candidates.group_id
                 FROM {from_items}
                 {where_clause}
                 ORDER BY candidates.sort_key DESC;
-            """.format(
+            """).format(
                 candidate_query=candidate_query,
-                from_items=',\n'.join(  # XXX: I don't understand why this isn't as documented
-                    ['\n'.join(['candidates'] + join_conditions)] + lateral_queries,
+                from_items=',\n  '.join(  # XXX: I don't understand why this isn't as documented
+                    ['\n  '.join(['candidates'] + join_conditions)] + lateral_queries,
                 ),
                 where_clause='WHERE {conditions}'.format(
-                    conditions=' AND '.join(where_conditions),
+                    conditions='\n  AND '.join(where_conditions),
                 ) if where_conditions else '',
             )
 
