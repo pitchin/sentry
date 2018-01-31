@@ -331,6 +331,10 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # This is all data from the `default` environment. It should return a
         # set of group IDs (unsorted.)
 
+        # TODO(tkaemming): If no filters are provided it might make sense to
+        # return from this method without making a query, letting the query run
+        # unrestricted in `filter_candidates`.
+
         from sentry.models import Group, GroupSubscription, GroupStatus
 
         queryset = Group.objects.filter(project=project)
