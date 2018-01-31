@@ -536,10 +536,16 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
             # TODO(tkaemming): Build the rest of the query here.
             query = u"""\
-                WITH candidates AS ({})
+                WITH candidates AS ({candidate_query})
                 SELECT candidates.group_id FROM candidates
+                {join_conditions}
+                {lateral_queries}
                 ORDER BY candidates.sort_key DESC;
-            """.format(candidate_query)
+            """.format(
+                candidate_query=candidate_query,
+                join_conditions='',
+                lateral_queries='',
+            )
 
             cursor = connection.cursor()
             cursor.execute(query, parameters)
