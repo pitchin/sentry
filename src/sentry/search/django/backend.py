@@ -285,12 +285,44 @@ sort_expressions = {
 }
 
 
+import bisect
+from sentry.utils.cursors import Cursor, CursorResult
+
+
 class SequencePaginator(object):
     def __init__(self, sequence):
-        self.sequence = sequence
+        self.items, self.scores = zip(
+            *sorted(
+                sequence,
+                key=lambda (item, score): score,
+            )
+        )
 
-    def get_result(self, limit, cursor):
-        raise NotImplementedError
+    def get_result(self, limit=100, cursor=None, count_hits=False):
+        if cursor is None:
+            cursor = Cursor(0, 0, False)
+
+        if cursor.is_prev:
+            raise NotImplementedError  # TODO
+
+        if cursor.value == 0:  # XXX: Doesn't this preclude 0 being a valid position?
+            index = 0
+        else:
+            index = bisect.bisect_left(self.scores, cursor.value) + cursor.offset
+
+        results = list(self.items[index:index + limit])
+
+        next_cursor = None
+        if len(self.items) - index > limit:
+            # TODO: Handle duplicate scores with offsets.
+            next_cursor = Cursor(self.scores[index + limit], 0, 0)
+
+        return CursorResult(
+            results,
+            next=next_cursor,
+            prev=None,
+            hits=len(self.items),
+        )
 
 
 class EnvironmentDjangoSearchBackend(SearchBackend):
@@ -322,6 +354,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               cursor=None,
               limit=None,
               ):
+        from sentry.models import Group
+
         assert environment_id is not None  # TODO: This would need to support the None case.
 
         # TODO(tkaemming): I don't know where this goes?
@@ -332,35 +366,45 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         if date_to is not None:
             raise NotImplementedError
 
-        results = self.filter_candidates(
-            project,
-            environment_id,
-            self.find_candidates(
+        result = SequencePaginator(
+            self.filter_candidates(
                 project,
                 environment_id,
-                query,
-                status,
-                bookmarked_by,
-                assigned_to,
-                unassigned,
-                subscribed_by,
-                active_at_from, active_at_from_inclusive,
-                active_at_to, active_at_to_inclusive,
-                first_release,
+                self.find_candidates(
+                    project,
+                    environment_id,
+                    query,
+                    status,
+                    bookmarked_by,
+                    assigned_to,
+                    unassigned,
+                    subscribed_by,
+                    active_at_from, active_at_from_inclusive,
+                    active_at_to, active_at_to_inclusive,
+                    first_release,
+                ),
+                tags,
+                age_from, age_from_inclusive,
+                age_to, age_to_inclusive,
+                last_seen_from, last_seen_from_inclusive,
+                last_seen_to, last_seen_to_inclusive,
+                times_seen,
+                times_seen_lower, times_seen_lower_inclusive,
+                times_seen_upper, times_seen_upper_inclusive,
+                sort_by,
+            )
+        ).get_result(limit, cursor)
+
+        # lol
+        result.results = filter(
+            None,
+            map(
+                Group.objects.in_bulk(result.results).get,
+                result.results,
             ),
-            tags,
-            age_from, age_from_inclusive,
-            age_to, age_to_inclusive,
-            last_seen_from, last_seen_from_inclusive,
-            last_seen_to, last_seen_to_inclusive,
-            times_seen,
-            times_seen_lower, times_seen_lower_inclusive,
-            times_seen_upper, times_seen_upper_inclusive,
-            sort_by,
         )
 
-        # TODO: Inject some transformation function or wrap it or some shit
-        return SequencePaginator(results).get_result(limit, cursor)
+        return result
 
     def find_candidates(self,
                         project,
@@ -563,8 +607,4 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
 
-        return sorted(
-            candidates.items(),
-            key=lambda (id, score): score,
-            reverse=True,
-        )
+        return candidates.items()
