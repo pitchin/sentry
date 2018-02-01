@@ -285,6 +285,14 @@ sort_expressions = {
 }
 
 
+class SequencePaginator(object):
+    def __init__(self, sequence):
+        self.sequence = sequence
+
+    def get_result(self, limit, cursor):
+        raise NotImplementedError
+
+
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
@@ -311,6 +319,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               count_hits=False,
               paginator_options=None,
               environment_id=None,
+              cursor=None,
+              limit=None,
               ):
         assert environment_id is not None  # TODO: This would need to support the None case.
 
@@ -349,9 +359,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             sort_by,
         )
 
-        # TODO: pagination
-
-        return results
+        # TODO: Inject some transformation function or wrap it or some shit
+        return SequencePaginator(results).get_result(limit, cursor)
 
     def find_candidates(self,
                         project,
