@@ -453,8 +453,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                           times_seen_lower=None, times_seen_lower_inclusive=True,
                           times_seen_upper=None, times_seen_upper_inclusive=True,
                           sort_by='date',
-                          cursor=None,
-                          limit=100,
                           ):
         # This is all data from `grouptags` database.  It should return a list
         # of group IDs (sorted.)
@@ -520,7 +518,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             select={'sort_key': sort_expressions[sort_by]}
         )
 
-        # TODO: This query should have a LIMIT.
         candidates = dict(queryset.values_list('group_id', 'sort_key'))
 
         # TODO: Sort the remaining tags by estimated selectivity to try and
@@ -538,7 +535,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                     group_id__in=candidates.keys(),
                 )
 
-            # TODO: This query should have a LIMIT.
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
 
