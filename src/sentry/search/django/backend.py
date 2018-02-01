@@ -349,7 +349,9 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             sort_by,
         )
 
-        raise NotImplementedError  # pagination
+        # TODO: pagination
+
+        return results
 
     def find_candidates(self,
                         project,
@@ -452,8 +454,9 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # seen in an environment after the issue's last seen timestamp.)
 
         # TODO(tkaemming): This queryset should probably have a limit
-        # associated with it? It should probably correspond to the maximum
-        # number of hits as well.
+        # associated with it? If there is one, it should be greater than (or
+        # equal to) the "maximum hits" number if we want that to reflect a
+        # realistic estimate.
         return set(queryset.values_list('id', flat=True))
 
     def filter_candidates(self,
