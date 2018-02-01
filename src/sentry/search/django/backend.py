@@ -293,30 +293,21 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               tags=None,
               bookmarked_by=None,
               assigned_to=None,
+              first_release=None,
               sort_by='date',
               unassigned=None,
               subscribed_by=None,
-              age_from=None,
-              age_from_inclusive=True,
-              age_to=None,
-              age_to_inclusive=True,
-              last_seen_from=None,
-              last_seen_from_inclusive=True,
-              last_seen_to=None,
-              last_seen_to_inclusive=True,
-              date_from=None,
-              date_from_inclusive=True,
-              date_to=None,
-              date_to_inclusive=True,
-              active_at_from=None,
-              active_at_from_inclusive=True,
-              active_at_to=None,
-              active_at_to_inclusive=True,
+              age_from=None, age_from_inclusive=True,
+              age_to=None, age_to_inclusive=True,
+              last_seen_from=None, last_seen_from_inclusive=True,
+              last_seen_to=None, last_seen_to_inclusive=True,
+              date_from=None, date_from_inclusive=True,
+              date_to=None, date_to_inclusive=True,
+              active_at_from=None, active_at_from_inclusive=True,
+              active_at_to=None, active_at_to_inclusive=True,
               times_seen=None,
-              times_seen_lower=None,
-              times_seen_lower_inclusive=True,
-              times_seen_upper=None,
-              times_seen_upper_inclusive=True,
+              times_seen_lower=None, times_seen_lower_inclusive=True,
+              times_seen_upper=None, times_seen_upper_inclusive=True,
               count_hits=False,
               paginator_options=None,
               environment_id=None,
@@ -331,7 +322,34 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         if date_to is not None:
             raise NotImplementedError
 
-        raise NotImplementedError
+        results = self.filter_candidates(
+            project,
+            environment_id,
+            self.find_candidates(
+                project,
+                environment_id,
+                query,
+                status,
+                bookmarked_by,
+                assigned_to,
+                unassigned,
+                subscribed_by,
+                active_at_from, active_at_from_inclusive,
+                active_at_to, active_at_to_inclusive,
+                first_release,
+            ),
+            tags,
+            age_from, age_from_inclusive,
+            age_to, age_to_inclusive,
+            last_seen_from, last_seen_from_inclusive,
+            last_seen_to, last_seen_to_inclusive,
+            times_seen,
+            times_seen_lower, times_seen_lower_inclusive,
+            times_seen_upper, times_seen_upper_inclusive,
+            sort_by,
+        )
+
+        raise NotImplementedError  # pagination
 
     def find_candidates(self,
                         project,
@@ -346,9 +364,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         active_at_to=None, active_at_to_inclusive=True,
                         first_release=None,
                         ):
-        # This is all data from the `default` environment. It should return a
-        # set of group IDs (unsorted.)
-
         # TODO(tkaemming): If no filters are provided it might make sense to
         # return from this method without making a query, letting the query run
         # unrestricted in `filter_candidates`.
@@ -437,7 +452,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # seen in an environment after the issue's last seen timestamp.)
 
         # TODO(tkaemming): This queryset should probably have a limit
-        # associated with it?
+        # associated with it? It should probably correspond to the maximum
+        # number of hits as well.
         return set(queryset.values_list('id', flat=True))
 
     def filter_candidates(self,
@@ -454,9 +470,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                           times_seen_upper=None, times_seen_upper_inclusive=True,
                           sort_by='date',
                           ):
-        # This is all data from `grouptags` database.  It should return a list
-        # of group IDs (sorted.)
-
         # TODO(tkaemming): This shouldn't be implemented like this, since this
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
