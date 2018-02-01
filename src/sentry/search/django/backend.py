@@ -8,9 +8,6 @@ sentry.search.django.backend
 
 from __future__ import absolute_import
 
-import itertools
-import textwrap
-
 from django.db import router
 from django.db.models import Q
 
@@ -280,7 +277,7 @@ def add_scalar_filter(queryset, field, operator, value, inclusive):
     })
 
 
-sort_strategies = {
+sort_expressions = {
     'priority': 'log(times_seen) * 600 + last_seen::abstime::int',
     'date': 'last_seen',
     'new': 'first_seen',
@@ -322,8 +319,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               times_seen_upper_inclusive=True,
               count_hits=False,
               paginator_options=None,
-              cursor=None,
-              limit=None,
               environment_id=None,
               ):
         assert environment_id is not None  # TODO: This would need to support the None case.
@@ -458,6 +453,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                           times_seen_lower=None, times_seen_lower_inclusive=True,
                           times_seen_upper=None, times_seen_upper_inclusive=True,
                           sort_by='date',
+                          cursor=None,
+                          limit=100,
                           ):
         # This is all data from `grouptags` database.  It should return a list
         # of group IDs (sorted.)
@@ -466,10 +463,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
 
-        from django.db import connections
         from sentry.search.base import ANY
-        from sentry.tagstore.models import GroupTagValue
-        from sentry.utils.db import is_postgres
+        from sentry.tagstore.models import GroupTagKey, GroupTagValue
 
         queryset = GroupTagValue.objects.filter(
             project_id=project.id,
@@ -522,88 +517,33 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 times_seen_upper_inclusive)
 
         queryset = queryset.extra(
-            select={'sort_key': sort_strategies[sort_by]}
+            select={'sort_key': sort_expressions[sort_by]}
         )
 
-        # TODO(tkaemming): Implement paginator functionality.
+        # TODO: This query should have a LIMIT.
+        candidates = dict(queryset.values_list('group_id', 'sort_key'))
 
-        # Filter on the remaining tags. For PostgreSQL, we can implement this
-        # as a CTE with lateral JOIN from the existing queryset (if we can get
-        # the raw SQL from the existing queryset?) For other databases, we can
-        # fall back to an iterative reduction of the results from the previous
-        # query.
-        if is_postgres():
-            connection = connections[router.db_for_read(GroupTagValue)]
-            candidate_query, parameters = queryset.values(
-                'group_id', 'sort_key').query.get_compiler(
-                connection=connection).as_nested_sql()
-
-            join_conditions = []
-            lateral_queries = []
-            where_conditions = []
-            parameters = list(parameters)
-
-            presence_tags = set()
-            specific_tags = {}
-
-            for key, value in tags.items():
-                if value is ANY:
-                    presence_tags.add(key)
-                else:
-                    specific_tags[key] = value
-
-            current_table_alias = 'candidates'
-            lateral_alias_sequence = itertools.count()
-            join_alias_sequence = itertools.count()
-
-            for key in presence_tags:
-                lateral_queries.append(
-                    'LATERAL (SELECT * FROM {table} WHERE group_id = candidates.group_id AND key = %s LIMIT 1) as {alias}'.format(
-                        table=GroupTagValue._meta.db_table,
-                        alias='grouptagvalue_lateral_{}'.format(next(lateral_alias_sequence)),
-                    )
+        # TODO: Sort the remaining tags by estimated selectivity to try and
+        # make this as efficient as possible.
+        for key, value in tags.items():
+            if value is ANY:
+                queryset = GroupTagKey.objects.filter(
+                    key=key,
+                    group_id__in=candidates.keys(),
                 )
-                parameters.append(key)
-
-            for key, value in specific_tags.items():
-                previous_table_alias = current_table_alias
-                current_table_alias = 'grouptagvalue_join_{}'.format(next(join_alias_sequence))
-                join_conditions.append(
-                    'INNER JOIN {table} {alias} ON {previous_alias}.group_id = {alias}.group_id'.format(
-                        table=GroupTagValue._meta.db_table,
-                        alias=current_table_alias,
-                        previous_alias=previous_table_alias,
-                    )
+            else:
+                queryset = GroupTagValue.objects.filter(
+                    key=key,
+                    value=value,
+                    group_id__in=candidates.keys(),
                 )
-                where_conditions.append(
-                    '({alias}.key = %s AND {alias}.value = %s)'.format(
-                        alias=current_table_alias))
-                parameters.extend([key, value])
 
-            query = textwrap.dedent(u"""\
-                WITH candidates AS ({candidate_query})
-                SELECT candidates.group_id
-                FROM {from_items}
-                {where_clause}
-                ORDER BY candidates.sort_key {sort_order};
-            """).format(
-                candidate_query=candidate_query,
-                from_items=',\n  '.join(  # XXX: I don't understand why this isn't as documented
-                    ['\n  '.join(['candidates'] + join_conditions)] + lateral_queries,
-                ),
-                where_clause='WHERE {conditions}'.format(
-                    conditions='\n  AND '.join(where_conditions),
-                ) if where_conditions else '',
-                sort_order='DESC',
-            )
+            # TODO: This query should have a LIMIT.
+            for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
+                del candidates[id]
 
-            cursor = connection.cursor()
-            cursor.execute(query, parameters)
-            candidates = map(
-                lambda (group_id,): int(group_id),
-                cursor,
-            )
-        else:
-            raise NotImplementedError
-
-        return candidates
+        return sorted(
+            candidates.items(),
+            key=lambda (id, score): score,
+            reverse=True,
+        )
