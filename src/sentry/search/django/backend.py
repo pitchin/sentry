@@ -367,9 +367,12 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               cursor=None,
               limit=None,
               ):
-        from sentry.models import Group
+        from sentry.models import Environment, Group
 
-        # TODO(tkaemming): This doesn't actually do anything with environment_id now???
+        environment_id = Environment.objects.get(
+            projects=project,
+            name=tags['environment'],
+        ).id
 
         # TODO(tkaemming): I don't know where this goes?
 
