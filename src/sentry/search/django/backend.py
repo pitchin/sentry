@@ -323,13 +323,17 @@ class SequencePaginator(object):
                 prev_index = prev_index - 1
                 next_offset = next_offset + 1
 
-            next_cursor = Cursor(next_value, next_offset, 0)
+            # TODO(tkaemming): I'm not sure the point of `has_results` here
+            next_cursor = Cursor(next_value, next_offset, 0, has_results=True)
 
         return CursorResult(
             results,
             next=next_cursor,
             prev=None,
+            # If you don't provide a max, the UI doesn't actually render the
+            # hit count correctly (even if there is no max???)
             hits=len(self.items),
+            max_hits=1000,
         )
 
 
@@ -364,7 +368,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               ):
         from sentry.models import Group
 
-        assert environment_id is not None  # TODO: This would need to support the None case.
+        # TODO(tkaemming): This doesn't actually do anything with environment_id now???
 
         # TODO(tkaemming): I don't know where this goes?
 
