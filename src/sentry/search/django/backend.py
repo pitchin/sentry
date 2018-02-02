@@ -297,7 +297,7 @@ class SequencePaginator(object):
                 sequence,
                 key=lambda (item, score): score,
             )
-        )
+        ) if sequence else [], []
 
     def get_result(self, limit=100, cursor=None, count_hits=False):
         if cursor is None:
@@ -439,9 +439,20 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # return from this method without making a query, letting the query run
         # unrestricted in `filter_candidates`.
 
-        from sentry.models import Group, GroupSubscription, GroupStatus
+        from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus
 
         queryset = Group.objects.filter(project=project)
+
+        if first_release is not None:  # TODO: Add this onto the GroupEnvironment query.
+            raise NotImplementedError
+
+        # TODO(tkaemming): Figure out how to write this as a JOIN instead of a subquery,
+        # this is super inefficient!
+        queryset = queryset.filter(
+            id__in=GroupEnvironment.objects.filter(
+                environment_id=environment_id,
+            ).values_list('id'),
+        )
 
         if query:
             # TODO(dcramer): if we want to continue to support search on SQL
@@ -506,16 +517,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 'lt',
                 active_at_to,
                 active_at_to_inclusive)
-
-        # TODO(tkaemming): Restrict the query to only those that have an
-        # associated `GroupEnvironment` record (and limit to the first release,
-        # if one is provided.) This could be done as a subquery, but preferably
-        # it's done as a join against the `GroupEnvironment` table. This means
-        # figuring out how to implement an ORM field that acts as a foreign key
-        # for JOIN purposes, but isn't actually implemented as a foreign key
-        # column under the hood.
-        if first_release is not None:
-            raise NotImplementedError
 
         # TODO(tkaemming): This shoould also utilize some of the scalar
         # attributes from `find_candidates` to rule out entries that are
