@@ -291,6 +291,7 @@ from sentry.utils.cursors import Cursor, CursorResult
 
 class SequencePaginator(object):
     def __init__(self, sequence):
+        # TODO(tkaemming): THIS NEEDS TO HANDLE REVERSE SORTING
         self.items, self.scores = zip(
             *sorted(
                 sequence,
