@@ -314,8 +314,16 @@ class SequencePaginator(object):
 
         next_cursor = None
         if len(self.items) - index > limit:
-            # TODO: Handle duplicate scores with offsets.
-            next_cursor = Cursor(self.scores[index + limit], 0, 0)
+            next_index = index + limit
+            next_value = self.scores[next_index]
+            next_offset = 0
+
+            prev_index = next_index - next_offset - 1
+            while self.scores[prev_index] == next_value and prev_index > -1:
+                prev_index = prev_index - 1
+                next_offset = next_offset + 1
+
+            next_cursor = Cursor(next_value, next_offset, 0)
 
         return CursorResult(
             results,
