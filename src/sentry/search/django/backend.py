@@ -443,14 +443,18 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         queryset = Group.objects.filter(project=project)
 
-        if first_release is not None:  # TODO: Add this onto the GroupEnvironment query.
-            raise NotImplementedError
+        group_environment_filters = {
+            'environment_id': environment_id,
+        }
+
+        if first_release is not None:
+            group_environment_filters['first_release_id'] = first_release.id
 
         # TODO(tkaemming): Figure out how to write this as a JOIN instead of a subquery,
         # this is super inefficient!
         queryset = queryset.filter(
             id__in=GroupEnvironment.objects.filter(
-                environment_id=environment_id,
+                **group_environment_filters
             ).values_list('id'),
         )
 
