@@ -285,56 +285,73 @@ sort_expressions = {
 }
 
 
-import bisect
+import operator
 from sentry.utils.cursors import Cursor, CursorResult
 
 
 class SequencePaginator(object):
-    def __init__(self, sequence):
-        # TODO(tkaemming): THIS NEEDS TO HANDLE REVERSE SORTING
-        self.items, self.scores = zip(
-            *sorted(
-                sequence,
-                key=lambda (item, score): score,
-            )
-        ) if sequence else [], []
+    def __init__(self, data, reverse=False):
+        self.data = sorted(data, reverse=reverse)
+        self.reverse = reverse
 
-    def get_result(self, limit=100, cursor=None, count_hits=False):
+    def get_result(self, limit, cursor=None):
         if cursor is None:
-            cursor = Cursor(0, 0, False)
+            cursor = (None, 0, False)
 
-        if cursor.is_prev:
-            raise NotImplementedError  # TODO
+        cursor_score, cursor_offset, cursor_previous = cursor
+        assert cursor_offset > -1
 
-        if cursor.value == 0:  # XXX: Doesn't this preclude 0 being a valid position?
-            index = 0
+        if cursor_score is None:
+            position = 0 if not cursor_previous else len(self.data)
         else:
-            index = bisect.bisect_left(self.scores, cursor.value) + cursor.offset
+            position = 0
+            # TODO: This point could be identified with binary search.
+            predicate = operator.ge if not self.reverse else operator.le
+            while position < len(self.data):
+                score, value = self.data[position]
+                if predicate(score, cursor_score):
+                    break
+                else:
+                    position = position + 1
 
-        results = list(self.items[index:index + limit])
+        position = position + cursor_offset
+
+        if not cursor_previous:
+            lo = max(position, 0)
+            hi = min(lo + limit, len(self.data))
+        else:
+            hi = min(position, len(self.data))
+            lo = max(hi - limit, 0)
+
+        results = map(
+            lambda (score, item): item,
+            self.data[lo:hi],
+        )
+
+        prev_cursor = None
+        if lo > 0:
+            prev_score = self.data[lo][0]
+            prev_offset = 0
+            # TODO: This point could be identified with binary search.
+            while prev_score == self.data[lo - prev_offset - 1][0]:
+                prev_offset = prev_offset + 1
+            prev_cursor = (prev_score, prev_offset, True)
 
         next_cursor = None
-        if len(self.items) - index > limit:
-            next_index = index + limit
-            next_value = self.scores[next_index]
+        if hi < len(self.data):
+            next_score = self.data[hi][0]
             next_offset = 0
-
-            prev_index = next_index - next_offset - 1
-            while self.scores[prev_index] == next_value and prev_index > -1:
-                prev_index = prev_index - 1
+            # TODO: This point could be identified with binary search.
+            while next_score == self.data[hi + next_offset - 1][0]:
                 next_offset = next_offset + 1
-
-            # TODO(tkaemming): I'm not sure the point of `has_results` here
-            next_cursor = Cursor(next_value, next_offset, 0, has_results=True)
+            next_cursor = (next_score, next_offset, False)
 
         return CursorResult(
             results,
-            next=next_cursor,
-            prev=None,
-            # If you don't provide a max, the UI doesn't actually render the
-            # hit count correctly (even if there is no max???)
-            hits=len(self.items),
-            max_hits=1000,
+            prev=Cursor(*prev_cursor) if prev_cursor is not None else None,
+            next=Cursor(*next_cursor) if next_cursor is not None else None,
+            hits=len(self.data),
+            max_hits=1000,  # XXX
         )
 
 
@@ -628,4 +645,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
 
-        return candidates.items()
+        return map(
+            lambda (id, score): (score, id),
+            candidates.items(),
+        )
