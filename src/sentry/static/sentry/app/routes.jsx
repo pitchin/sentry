@@ -240,6 +240,22 @@ const projectSettingsRoutes = [
     component={errorHandler(LazyLoad)}
   />,
   <Route
+    key="hooks/"
+    path="hooks/"
+    name="Service Hooks"
+    componentPromise={() =>
+      import(/*webpackChunkName: "ProjectServiceHooks"*/ './views/settings/project/projectServiceHooks')}
+    component={errorHandler(LazyLoad)}
+  />,
+  <Route
+    key="hooks/edit/"
+    path="hooks/:hookId/"
+    name="Edit Service Hook"
+    componentPromise={() =>
+      import(/*webpackChunkName: "ProjectServiceHookDetails"*/ './views/settings/project/projectServiceHookDetails')}
+    component={errorHandler(LazyLoad)}
+  />,
+  <Route
     key="alerts/"
     name="Alerts"
     path="alerts/"
