@@ -456,24 +456,36 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # return from this method without making a query, letting the query run
         # unrestricted in `filter_candidates`.
 
-        from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus
+        from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus, Release
 
-        queryset = Group.objects.filter(project=project)
-
-        group_environment_filters = {
-            'environment_id': environment_id,
-        }
+        queryset = Group.objects.filter(project=project).extra(
+            where=[
+                '"{}"."{}" = "{}"."{}"'.format(
+                    Group._meta.db_table, 'id',
+                    GroupEnvironment._meta.db_table, 'group_id',
+                ),
+                '"{}"."{}" = %s'.format(
+                    GroupEnvironment._meta.db_table, 'environment_id',
+                ),
+            ],
+            params=[environment_id],
+            tables=[GroupEnvironment._meta.db_table],
+        )
 
         if first_release is not None:
-            group_environment_filters['first_release_id'] = first_release.id
-
-        # TODO(tkaemming): Figure out how to write this as a JOIN instead of a subquery,
-        # this is super inefficient!
-        queryset = queryset.filter(
-            id__in=GroupEnvironment.objects.filter(
-                **group_environment_filters
-            ).values_list('id'),
-        )
+            queryset = queryset.extra(
+                where=[
+                    '"{}"."{}" = "{}"."{}"'.format(
+                        GroupEnvironment._meta.db_table, 'first_release_id',
+                        Release._meta.db_table, 'id',
+                    ),
+                    '"{}"."{}" = %s'.format(
+                        Release._meta.db_table, 'version',
+                    ),
+                ],
+                params=[first_release],
+                tables=[Release._meta.db_table],
+            )
 
         if query:
             # TODO(dcramer): if we want to continue to support search on SQL
