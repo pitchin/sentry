@@ -355,6 +355,29 @@ class SequencePaginator(object):
         )
 
 
+undefined = object()
+
+
+class QueryBuilder(object):
+    def __init__(self, handlers):
+        self.handlers = handlers
+
+    def build(self, queryset, parameters):
+        for parameter, handler, extra_parameters in self.handlers:
+            value = parameters.pop(parameter, undefined)
+            if value is not undefined:
+                queryset = handler(
+                    queryset,
+                    value,
+                    {name: parameters.pop(name) for name in extra_parameters},
+                )
+
+        if parameters:
+            pass  # TODO: Raise an error or warn here about unhandled parameters.
+
+        return queryset
+
+
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
@@ -403,28 +426,36 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             self.filter_candidates(
                 project,
                 environment_id,
-                self.find_candidates(
+                tags,
+                sort_by,
+                candidates=self.find_candidates(
                     project,
                     environment_id,
-                    query,
-                    status,
-                    bookmarked_by,
-                    assigned_to,
-                    unassigned,
-                    subscribed_by,
-                    active_at_from, active_at_from_inclusive,
-                    active_at_to, active_at_to_inclusive,
-                    first_release,
+                    query=query,
+                    status=status,
+                    bookmarked_by=bookmarked_by,
+                    assigned_to=assigned_to,
+                    unassigned=unassigned,
+                    subscribed_by=subscribed_by,
+                    active_at_from=active_at_from,
+                    active_at_from_inclusive=active_at_from_inclusive,
+                    active_at_to=active_at_to,
+                    active_at_to_inclusive=active_at_to_inclusive,
+                    first_release=first_release,
                 ),
-                tags,
-                age_from, age_from_inclusive,
-                age_to, age_to_inclusive,
-                last_seen_from, last_seen_from_inclusive,
-                last_seen_to, last_seen_to_inclusive,
-                times_seen,
-                times_seen_lower, times_seen_lower_inclusive,
-                times_seen_upper, times_seen_upper_inclusive,
-                sort_by,
+                age_from=age_from,
+                age_from_inclusive=age_from_inclusive,
+                age_to=age_to,
+                age_to_inclusive=age_to_inclusive,
+                last_seen_from=last_seen_from,
+                last_seen_from_inclusive=last_seen_from_inclusive,
+                last_seen_to=last_seen_to,
+                last_seen_to_inclusive=last_seen_to_inclusive,
+                times_seen=times_seen,
+                times_seen_lower=times_seen_lower,
+                times_seen_lower_inclusive=times_seen_lower_inclusive,
+                times_seen_upper=times_seen_upper,
+                times_seen_upper_inclusive=times_seen_upper_inclusive,
             )
         ).get_result(limit, cursor)
 
@@ -439,37 +470,38 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         return result
 
-    def find_candidates(self,
-                        project,
-                        environment_id,
-                        query=None,
-                        status=None,
-                        bookmarked_by=None,
-                        assigned_to=None,
-                        unassigned=None,
-                        subscribed_by=None,
-                        active_at_from=None, active_at_from_inclusive=True,
-                        active_at_to=None, active_at_to_inclusive=True,
-                        first_release=None,
-                        ):
+    def find_candidates(self, project, environment_id, **kwargs):
         # TODO(tkaemming): If no filters are provided it might make sense to
         # return from this method without making a query, letting the query run
         # unrestricted in `filter_candidates`.
 
         from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus, Release
 
-        queryset = Group.objects.filter(project=project).extra(
-            where=[
-                '"{}"."{}" = "{}"."{}"'.format(
-                    Group._meta.db_table, 'id',
-                    GroupEnvironment._meta.db_table, 'group_id',
-                ),
-                '"{}"."{}" = %s'.format(
-                    GroupEnvironment._meta.db_table, 'environment_id',
-                ),
-            ],
-            params=[environment_id],
-            tables=[GroupEnvironment._meta.db_table],
+        queryset = QueryBuilder({
+            'first_release':
+            'query':
+            'status':
+            'bookmarked_by':
+            'assigned_to':
+            'unassigned':
+            'subscribed_by':
+            'active_at_from': scalar('active_at_from', 'active_at', 'gt'),
+            'active_at_to': scalar('active_at_to', 'active_at', 'lt'),
+        }).build(
+            Group.objects.filter(project=project).extra(
+                where=[
+                    '"{}"."{}" = "{}"."{}"'.format(
+                        Group._meta.db_table, 'id',
+                        GroupEnvironment._meta.db_table, 'group_id',
+                    ),
+                    '"{}"."{}" = %s'.format(
+                        GroupEnvironment._meta.db_table, 'environment_id',
+                    ),
+                ],
+                params=[environment_id],
+                tables=[GroupEnvironment._meta.db_table],
+            ),
+            **kwargs
         )
 
         if first_release is not None:
@@ -532,25 +564,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 ).values_list('group'),
             )
 
-        # TODO(tkaemming): I'm not sure if this is the right place for these
-        # checks but we don't track this on a per-environment basis and I'm not
-        # entirely sure it makes sense to...?
-        if active_at_from is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'active_at',
-                'gt',
-                active_at_from,
-                active_at_from_inclusive)
-
-        if active_at_to is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'active_at',
-                'lt',
-                active_at_to,
-                active_at_to_inclusive)
-
         # TODO(tkaemming): This shoould also utilize some of the scalar
         # attributes from `find_candidates` to rule out entries that are
         # impossible based on aggregate attributes (e.g. an issue cannot be
@@ -560,22 +573,10 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # associated with it? If there is one, it should be greater than (or
         # equal to) the "maximum hits" number if we want that to reflect a
         # realistic estimate.
+
         return set(queryset.values_list('id', flat=True))
 
-    def filter_candidates(self,
-                          project,
-                          environment_id,
-                          candidates=None,
-                          tags=None,
-                          age_from=None, age_from_inclusive=True,
-                          age_to=None, age_to_inclusive=True,
-                          last_seen_from=None, last_seen_from_inclusive=True,
-                          last_seen_to=None, last_seen_to_inclusive=True,
-                          times_seen=None,
-                          times_seen_lower=None, times_seen_lower_inclusive=True,
-                          times_seen_upper=None, times_seen_upper_inclusive=True,
-                          sort_by='date',
-                          ):
+    def filter_candidates(self, project, environment_id, tags=None, sort_by='date', **kwargs):
         # TODO(tkaemming): This shouldn't be implemented like this, since this
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
@@ -583,59 +584,25 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         from sentry.search.base import ANY
         from sentry.tagstore.models import GroupTagKey, GroupTagValue
 
-        queryset = GroupTagValue.objects.filter(
-            project_id=project.id,
-            key='environment',
-            value=tags.pop('environment'),
-        )
-
-        if candidates is not None:
-            queryset = queryset.filter(group_id__in=candidates)
-
-        if age_from is not None:
-            queryset = add_scalar_filter(queryset, 'first_seen', 'gt', age_from, age_from_inclusive)
-
-        if age_to is not None:
-            queryset = add_scalar_filter(queryset, 'first_seen', 'lt', age_to, age_to_inclusive)
-
-        if last_seen_from is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'last_seen',
-                'gt',
-                last_seen_from,
-                last_seen_from_inclusive)
-
-        if last_seen_to is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'last_seen',
-                'lt',
-                last_seen_to,
-                last_seen_to_inclusive)
-
-        if times_seen is not None:
-            queryset = queryset.times_seen(times_seen=times_seen)
-
-        if times_seen_lower is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'times_seen',
-                'gt',
-                times_seen_lower,
-                times_seen_lower_inclusive)
-
-        if times_seen_upper is not None:
-            queryset = add_scalar_filter(
-                queryset,
-                'times_seen',
-                'lt',
-                times_seen_upper,
-                times_seen_upper_inclusive)
-
-        queryset = queryset.extra(
-            select={'sort_key': sort_expressions[sort_by]}
-        )
+        queryset = QueryBuilder({
+            'candidates': simple(lambda queryset, candidates: queryset.filter(group_id__in=candidates)),
+            'age_from': scalar('age_from', 'first_seen', 'gt'),
+            'age_to': scalar('age_to', 'first_seen', 'lt'),
+            'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
+            'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
+            'times_seen': simple(lambda queryset, times_seen: queryset.filter(times_seen=times_seen)),
+            'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
+            'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
+        }).build(
+            GroupTagValue.objects.filter(
+                project_id=project.id,
+                key='environment',
+                value=tags.pop('environment'),
+            ),
+            **kwargs
+        ).extra(select={
+            'sort_key': sort_expressions[sort_by],
+        })
 
         candidates = dict(queryset.values_list('group_id', 'sort_key'))
 
