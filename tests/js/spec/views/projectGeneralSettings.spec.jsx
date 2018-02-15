@@ -1,17 +1,21 @@
 import React from 'react';
 import {ThemeProvider} from 'emotion-theming';
-import {mount, shallow} from 'enzyme';
+import {mount} from 'enzyme';
 
 import {Client} from 'app/api';
 
 import ProjectGeneralSettings from 'app/views/projectGeneralSettings';
 import theme from 'app/utils/theme';
 
+jest.mock('jquery');
+
 describe('projectGeneralSettings', function() {
   let org = TestStubs.Organization();
   let project = TestStubs.Project();
 
   beforeEach(function() {
+    sinon.stub(window.location, 'assign');
+    Client.clearMockResponses();
     Client.addMockResponse({
       url: `/projects/${org.slug}/${project.slug}/`,
       method: 'GET',
@@ -19,14 +23,16 @@ describe('projectGeneralSettings', function() {
     });
   });
 
+  afterEach(function() {
+    window.location.assign.restore();
+  });
+
   it('renders', function() {
-    let component = shallow(
-      <ProjectGeneralSettings params={{orgId: org.slug, projectId: project.slug}} />,
-      {
-        context: {
-          organization: org,
-        },
-      }
+    let component = mount(
+      <ThemeProvider theme={theme}>
+        <ProjectGeneralSettings params={{orgId: org.slug, projectId: project.slug}} />
+      </ThemeProvider>,
+      TestStubs.routerContext()
     );
     expect(component).toMatchSnapshot();
   });
@@ -43,7 +49,12 @@ describe('projectGeneralSettings', function() {
     expect(component.find('Switch[name="dataScrubber"]').prop('isDisabled')).toBe(true);
   });
 
-  it('project admins can transfer or remove project', function() {
+  it('project admins can remove project', function() {
+    let deleteMock = Client.addMockResponse({
+      url: `/projects/${org.slug}/${project.slug}/`,
+      method: 'DELETE',
+    });
+
     let component = mount(
       <ThemeProvider theme={theme}>
         <ProjectGeneralSettings params={{orgId: org.slug, projectId: project.slug}} />
@@ -51,11 +62,54 @@ describe('projectGeneralSettings', function() {
       TestStubs.routerContext()
     );
 
-    let removeBtn = component.find('a.btn.btn-danger').first();
-    let transferBtn = component.find('a.btn.btn-danger').at(1);
+    let removeBtn = component.find('.ref-remove-project').first();
 
-    expect(removeBtn.text()).toBe('Remove Project');
-    expect(transferBtn.text()).toBe('Transfer Project');
+    expect(removeBtn.prop('children')).toBe('Remove Project');
+
+    // Click button
+    removeBtn.simulate('click');
+
+    // Confirm Modal
+    component.find('Modal Button[priority="danger"]').simulate('click');
+
+    expect(deleteMock).toHaveBeenCalled();
+  });
+
+  it('project admins can transfer project', function() {
+    let deleteMock = Client.addMockResponse({
+      url: `/projects/${org.slug}/${project.slug}/transfer/`,
+      method: 'POST',
+    });
+
+    let component = mount(
+      <ThemeProvider theme={theme}>
+        <ProjectGeneralSettings params={{orgId: org.slug, projectId: project.slug}} />
+      </ThemeProvider>,
+      TestStubs.routerContext()
+    );
+
+    let removeBtn = component.find('.ref-transfer-project').first();
+
+    expect(removeBtn.prop('children')).toBe('Transfer Project');
+
+    // Click button
+    removeBtn.simulate('click');
+
+    // Confirm Modal
+    component
+      .find('input[name="email"]')
+      .simulate('change', {target: {value: 'billy@sentry.io'}});
+    component.find('Modal Button[priority="danger"]').simulate('click');
+
+    expect(deleteMock).toHaveBeenCalledWith(
+      `/projects/${org.slug}/${project.slug}/transfer/`,
+      expect.objectContaining({
+        method: 'POST',
+        data: {
+          email: 'billy@sentry.io',
+        },
+      })
+    );
   });
 
   it('displays transfer/remove message for non-admins', function() {
