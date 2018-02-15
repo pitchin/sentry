@@ -267,16 +267,6 @@ class DjangoSearchBackend(SearchBackend):
         return paginator.get_result(limit, cursor, count_hits=count_hits)
 
 
-def add_scalar_filter(queryset, field, operator, value, inclusive):
-    return queryset.filter(**{
-        '{}__{}{}'.format(
-            field,
-            operator,
-            'e' if inclusive else ''
-        ): value,
-    })
-
-
 sort_expressions = {
     'priority': 'log(times_seen) * 600 + last_seen::abstime::int',
     'date': 'last_seen',
@@ -355,6 +345,19 @@ class SequencePaginator(object):
         )
 
 
+def scalar(parameter, field, operator):
+    return (
+        lambda queryset, value, inclusive: queryset.filter(**{
+            '{}__{}{}'.format(
+                field,
+                operator,
+                'e' if inclusive else ''
+            ): value,
+        }),
+        ['{}_inclusive'.format(parameter)],
+    )
+
+
 undefined = object()
 
 
@@ -363,13 +366,13 @@ class QueryBuilder(object):
         self.handlers = handlers
 
     def build(self, queryset, parameters):
-        for parameter, handler, extra_parameters in self.handlers:
+        for parameter, (handler, extra_parameters) in self.handlers.items():
             value = parameters.pop(parameter, undefined)
             if value is not undefined:
                 queryset = handler(
                     queryset,
                     value,
-                    {name: parameters.pop(name) for name in extra_parameters},
+                    *[parameters.pop(name) for name in extra_parameters]
                 )
 
         if parameters:
@@ -478,91 +481,90 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus, Release
 
         queryset = QueryBuilder({
-            'first_release':
-            'query':
-            'status':
-            'bookmarked_by':
-            'assigned_to':
-            'unassigned':
-            'subscribed_by':
+            'first_release': (
+                lambda queryset, version: queryset.extra(
+                    where=[
+                        '"{}"."{}" = "{}"."{}"'.format(
+                            GroupEnvironment._meta.db_table,
+                            GroupEnvironment._meta.get_field_by_name('first_release_id')[0].column,
+                            Release._meta.db_table,
+                            Release._meta.get_field_by_name('id')[0].column,
+                        ),
+                        '"{}"."{}" = %s'.format(
+                            Release._meta.db_table,
+                            Release._meta.get_field_by_name('version')[0].column,
+                        ),
+                    ],
+                    params=[version],
+                    tables=[Release._meta.db_table],
+                ),
+                [],
+            ),
+            'query': (
+                lambda queryset, query: queryset.filter(
+                    Q(message__icontains=query) | Q(culprit__icontains=query),
+                ),
+                [],
+            ),
+            'status': (
+                lambda queryset, status: queryset.filter(status=status),
+                [],
+            ),
+            'bookmarked_by': (
+                lambda queryset, user: queryset.filter(
+                    bookmark_set__project=project,
+                    bookmark_set__user=user,
+                ),
+                [],
+            ),
+            'assigned_to': (
+                lambda queryset, user: queryset.filter(
+                    assignee_set__project=project,
+                    assignee_set__user=user,
+                ),
+                [],
+            ),
+            'unassigned': (
+                lambda queryset, unassigned: queryset.filter(
+                    assignee_set__isnull=unassigned,
+                ),
+                [],
+            ),
+            'subscribed_by': (
+                lambda queryset, user: queryset.filter(
+                    id__in=GroupSubscription.objects.filter(
+                        project=project,
+                        user=user,
+                        is_active=True,
+                    ).values_list('group'),
+                ),
+                [],
+            ),
             'active_at_from': scalar('active_at_from', 'active_at', 'gt'),
             'active_at_to': scalar('active_at_to', 'active_at', 'lt'),
         }).build(
-            Group.objects.filter(project=project).extra(
+            Group.objects.filter(project=project).exclude(status__in=[
+                GroupStatus.PENDING_DELETION,
+                GroupStatus.DELETION_IN_PROGRESS,
+                GroupStatus.PENDING_MERGE,
+            ]).extra(
                 where=[
                     '"{}"."{}" = "{}"."{}"'.format(
-                        Group._meta.db_table, 'id',
-                        GroupEnvironment._meta.db_table, 'group_id',
+                        Group._meta.db_table,
+                        Group._meta.get_field_by_name('id')[0].column,
+                        GroupEnvironment._meta.db_table,
+                        GroupEnvironment._meta.get_field_by_name('group_id')[0].column,
                     ),
                     '"{}"."{}" = %s'.format(
-                        GroupEnvironment._meta.db_table, 'environment_id',
+                        GroupEnvironment._meta.db_table,
+                        GroupEnvironment._meta.get_field_by_name('environment_id')[0].column,
                     ),
                 ],
                 params=[environment_id],
                 tables=[GroupEnvironment._meta.db_table],
             ),
-            **kwargs
+            kwargs
         )
-
-        if first_release is not None:
-            queryset = queryset.extra(
-                where=[
-                    '"{}"."{}" = "{}"."{}"'.format(
-                        GroupEnvironment._meta.db_table, 'first_release_id',
-                        Release._meta.db_table, 'id',
-                    ),
-                    '"{}"."{}" = %s'.format(
-                        Release._meta.db_table, 'version',
-                    ),
-                ],
-                params=[first_release],
-                tables=[Release._meta.db_table],
-            )
-
-        if query:
-            # TODO(dcramer): if we want to continue to support search on SQL
-            # we should at least optimize this in Postgres so that it does
-            # the query filter **after** the index filters, and restricts the
-            # result set
-            # XXX(tkaemming): This is not environment-aware
-            queryset = queryset.filter(Q(message__icontains=query) | Q(culprit__icontains=query))
-
-        if status is None:
-            queryset = queryset.exclude(status__in=[
-                GroupStatus.PENDING_DELETION,
-                GroupStatus.DELETION_IN_PROGRESS,
-                GroupStatus.PENDING_MERGE,
-            ])
-        else:
-            queryset = queryset.filter(status=status)
-
-        if bookmarked_by:
-            queryset = queryset.filter(
-                bookmark_set__project=project,
-                bookmark_set__user=bookmarked_by,
-            )
-
-        if assigned_to is not None:
-            assert unassigned is None
-            queryset = queryset.filter(
-                assignee_set__project=project,
-                assignee_set__user=assigned_to,
-            )
-
-        if unassigned is not None:
-            assert assigned_to is None
-            queryset = queryset.filter(
-                assignee_set__isnull=unassigned,
-            )
-
-        if subscribed_by is not None:
-            queryset = queryset.filter(
-                id__in=GroupSubscription.objects.filter(
-                    project=project,
-                    user=subscribed_by,
-                    is_active=True,
-                ).values_list('group'),
-            )
 
         # TODO(tkaemming): This shoould also utilize some of the scalar
         # attributes from `find_candidates` to rule out entries that are
@@ -585,12 +587,18 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         from sentry.tagstore.models import GroupTagKey, GroupTagValue
 
         queryset = QueryBuilder({
-            'candidates': simple(lambda queryset, candidates: queryset.filter(group_id__in=candidates)),
+            'candidates': (
+                lambda queryset, candidates: queryset.filter(group_id__in=candidates),
+                [],
+            ),
             'age_from': scalar('age_from', 'first_seen', 'gt'),
             'age_to': scalar('age_to', 'first_seen', 'lt'),
             'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
             'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
-            'times_seen': simple(lambda queryset, times_seen: queryset.filter(times_seen=times_seen)),
+            'times_seen': (
+                lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
+                [],
+            ),
             'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
             'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
         }).build(
@@ -599,7 +607,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 key='environment',
                 value=tags.pop('environment'),
             ),
-            **kwargs
+            kwargs
         ).extra(select={
             'sort_key': sort_expressions[sort_by],
         })
