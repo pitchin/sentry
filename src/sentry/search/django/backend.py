@@ -367,16 +367,13 @@ class QueryBuilder(object):
 
     def build(self, queryset, parameters):
         for parameter, (handler, extra_parameters) in self.handlers.items():
-            value = parameters.pop(parameter, undefined)
+            value = parameters.get(parameter, undefined)
             if value is not undefined:
                 queryset = handler(
                     queryset,
                     value,
-                    *[parameters.pop(name) for name in extra_parameters]
+                    *[parameters[name] for name in extra_parameters]
                 )
-
-        if parameters:
-            pass  # TODO: Raise an error or warn here about unhandled parameters.
 
         return queryset
 
@@ -384,31 +381,14 @@ class QueryBuilder(object):
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
-              query=None,
-              status=None,
               tags=None,
-              bookmarked_by=None,
-              assigned_to=None,
-              first_release=None,
               sort_by='date',
-              unassigned=None,
-              subscribed_by=None,
-              age_from=None, age_from_inclusive=True,
-              age_to=None, age_to_inclusive=True,
-              last_seen_from=None, last_seen_from_inclusive=True,
-              last_seen_to=None, last_seen_to_inclusive=True,
-              date_from=None, date_from_inclusive=True,
-              date_to=None, date_to_inclusive=True,
-              active_at_from=None, active_at_from_inclusive=True,
-              active_at_to=None, active_at_to_inclusive=True,
-              times_seen=None,
-              times_seen_lower=None, times_seen_lower_inclusive=True,
-              times_seen_upper=None, times_seen_upper_inclusive=True,
               count_hits=False,
               paginator_options=None,
               environment_id=None,
               cursor=None,
               limit=None,
+              **kwargs
               ):
         from sentry.models import Environment, Group
 
@@ -419,11 +399,13 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         # TODO(tkaemming): I don't know where this goes?
 
+        """
         if date_from is not None:
             raise NotImplementedError
 
         if date_to is not None:
             raise NotImplementedError
+        """
 
         result = SequencePaginator(
             self.filter_candidates(
@@ -434,31 +416,9 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 candidates=self.find_candidates(
                     project,
                     environment_id,
-                    query=query,
-                    status=status,
-                    bookmarked_by=bookmarked_by,
-                    assigned_to=assigned_to,
-                    unassigned=unassigned,
-                    subscribed_by=subscribed_by,
-                    active_at_from=active_at_from,
-                    active_at_from_inclusive=active_at_from_inclusive,
-                    active_at_to=active_at_to,
-                    active_at_to_inclusive=active_at_to_inclusive,
-                    first_release=first_release,
+                    **kwargs
                 ),
-                age_from=age_from,
-                age_from_inclusive=age_from_inclusive,
-                age_to=age_to,
-                age_to_inclusive=age_to_inclusive,
-                last_seen_from=last_seen_from,
-                last_seen_from_inclusive=last_seen_from_inclusive,
-                last_seen_to=last_seen_to,
-                last_seen_to_inclusive=last_seen_to_inclusive,
-                times_seen=times_seen,
-                times_seen_lower=times_seen_lower,
-                times_seen_lower_inclusive=times_seen_lower_inclusive,
-                times_seen_upper=times_seen_upper,
-                times_seen_upper_inclusive=times_seen_upper_inclusive,
+                **kwargs
             )
         ).get_result(limit, cursor)
 
@@ -492,10 +452,14 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         ),
                         '"{}"."{}" = %s'.format(
                             Release._meta.db_table,
+                            Release._meta.get_field_by_name('organization')[0].column,
+                        ),
+                        '"{}"."{}" = %s'.format(
+                            Release._meta.db_table,
                             Release._meta.get_field_by_name('version')[0].column,
                         ),
                     ],
-                    params=[version],
+                    params=[project.organization_id, version],
                     tables=[Release._meta.db_table],
                 ),
                 [],
@@ -503,7 +467,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             'query': (
                 lambda queryset, query: queryset.filter(
                     Q(message__icontains=query) | Q(culprit__icontains=query),
-                ),
+                ) if query else queryset,
                 [],
             ),
             'status': (
