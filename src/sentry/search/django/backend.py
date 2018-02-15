@@ -8,6 +8,8 @@ sentry.search.django.backend
 
 from __future__ import absolute_import
 
+from collections import namedtuple
+
 from django.db import router
 from django.db.models import Q
 
@@ -378,6 +380,14 @@ class QueryBuilder(object):
         return queryset
 
 
+class Column(namedtuple('Column', 'model field')):
+    def __str__(self):
+        return '"{}"."{}"'.format(*[
+            self.model._meta.db_table,
+            self.model._meta.get_field_by_name(self.field)[0].column,
+        ])
+
+
 class EnvironmentDjangoSearchBackend(SearchBackend):
     def query(self,
               project,
@@ -444,19 +454,15 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             'first_release': (
                 lambda queryset, version: queryset.extra(
                     where=[
-                        '"{}"."{}" = "{}"."{}"'.format(
-                            GroupEnvironment._meta.db_table,
-                            GroupEnvironment._meta.get_field_by_name('first_release_id')[0].column,
-                            Release._meta.db_table,
-                            Release._meta.get_field_by_name('id')[0].column,
+                        '{} = {}'.format(
+                            Column(GroupEnvironment, 'first_release_id'),
+                            Column(Release, 'id'),
                         ),
-                        '"{}"."{}" = %s'.format(
-                            Release._meta.db_table,
-                            Release._meta.get_field_by_name('organization')[0].column,
+                        '{} = %s'.format(
+                            Column(Release, 'organization'),
                         ),
-                        '"{}"."{}" = %s'.format(
-                            Release._meta.db_table,
-                            Release._meta.get_field_by_name('version')[0].column,
+                        '{} = %s'.format(
+                            Column(Release, 'version'),
                         ),
                     ],
                     params=[project.organization_id, version],
@@ -513,15 +519,12 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 GroupStatus.PENDING_MERGE,
             ]).extra(
                 where=[
-                    '"{}"."{}" = "{}"."{}"'.format(
-                        Group._meta.db_table,
-                        Group._meta.get_field_by_name('id')[0].column,
-                        GroupEnvironment._meta.db_table,
-                        GroupEnvironment._meta.get_field_by_name('group_id')[0].column,
+                    '{} = {}'.format(
+                        Column(Group, 'id'),
+                        Column(GroupEnvironment, 'group_id'),
                     ),
-                    '"{}"."{}" = %s'.format(
-                        GroupEnvironment._meta.db_table,
-                        GroupEnvironment._meta.get_field_by_name('environment_id')[0].column,
+                    '{} = %s'.format(
+                        Column(GroupEnvironment, 'environment_id'),
                     ),
                 ],
                 params=[environment_id],
