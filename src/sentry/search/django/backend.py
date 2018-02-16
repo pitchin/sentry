@@ -297,18 +297,8 @@ from sentry.utils.cursors import Cursor, CursorResult
 
 
 class SequencePaginator(object):
-    def __init__(self, data, value_to_cursor_score, reverse=False):
-        self.data = sorted(
-            map(
-                lambda (score, item): (
-                    value_to_cursor_score(score),
-                    item,
-                ),
-                data,
-            ),
-            reverse=reverse,
-        )
-        self.value_to_cursor_score = value_to_cursor_score
+    def __init__(self, data, reverse=False):
+        self.data = sorted(data, reverse=reverse)
         self.reverse = reverse
 
     def get_result(self, limit, cursor=None):
@@ -443,14 +433,12 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             raise NotImplementedError
         """
 
-        sort_expression, value_to_cursor_score = sort_strategies[sort_by]
-
         result = SequencePaginator(
             self.filter_candidates(
                 project,
                 environment_id,
                 tags,
-                sort_expression,
+                sort_by,
                 candidates=self.find_candidates(
                     project,
                     environment_id,
@@ -458,7 +446,6 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 ),
                 **kwargs
             ),
-            value_to_cursor_score,
             reverse=True,
         ).get_result(limit, cursor)
 
@@ -576,13 +563,15 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         return set(queryset.values_list('id', flat=True))
 
-    def filter_candidates(self, project, environment_id, tags, sort_expression, **kwargs):
+    def filter_candidates(self, project, environment_id, tags, sort_by, **kwargs):
         # TODO(tkaemming): This shouldn't be implemented like this, since this
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
 
         from sentry.search.base import ANY
         from sentry.tagstore.models import GroupTagKey, GroupTagValue
+
+        sort_expression, value_to_cursor_score = sort_strategies[sort_by]
 
         queryset = QueryBuilder({
             'candidates': (
@@ -631,6 +620,9 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 del candidates[id]
 
         return map(
-            lambda (id, score): (score, id),
+            lambda (id, score): (
+                value_to_cursor_score(score),
+                id,
+            ),
             candidates.items(),
         )
