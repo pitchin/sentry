@@ -270,25 +270,11 @@ class DjangoSearchBackend(SearchBackend):
         return paginator.get_result(limit, cursor, count_hits=count_hits)
 
 
-identity = lambda value: value
-
 sort_strategies = {
-    'priority': (
-        'log(times_seen) * 600 + last_seen::abstime::int',
-        identity,
-    ),
-    'date': (
-        'last_seen',
-        lambda score: int(to_timestamp(score) * 1000),
-    ),
-    'new': (
-        'first_seen',
-        lambda score: int(to_timestamp(score) * 1000),
-    ),
-    'freq': (
-        'times_seen',
-        identity,
-    ),
+    'priority': ('log(times_seen) * 600 + last_seen::abstime::int', int),
+    'date': ('last_seen', lambda score: int(to_timestamp(score) * 1000)),
+    'new': ('first_seen', lambda score: int(to_timestamp(score) * 1000)),
+    'freq': ('times_seen', int),
 }
 
 
@@ -341,16 +327,16 @@ class SequencePaginator(object):
             prev_score = self.data[lo][0]
             prev_offset = 0
             # TODO: This point could be identified with binary search.
-            while prev_score == self.data[lo - prev_offset - 1][0]:
+            while lo - prev_offset - 1 > -1 and prev_score == self.data[lo - prev_offset - 1][0]:
                 prev_offset = prev_offset + 1
             prev_cursor = (prev_score, prev_offset, True, True)
 
         next_cursor = None
         if hi < len(self.data):
             next_score = self.data[hi][0]
-            next_offset = 0
             # TODO: This point could be identified with binary search.
-            while hi + next_offset - 1 < len(self.data) and next_score == self.data[hi + next_offset - 1][0]:
+            next_offset = 0
+            while hi - next_offset - 1 > -1 and next_score == self.data[hi - next_offset - 1][0]:
                 next_offset = next_offset + 1
             next_cursor = (next_score, next_offset, False, True)
 
