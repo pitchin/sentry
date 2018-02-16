@@ -314,6 +314,10 @@ class SequencePaginator(object):
             lo = max(position, 0)
             hi = min(lo + limit, len(self.data))
         else:
+            # TODO: It might make sense to ensure that this hi value is at
+            # least the length of the page + 1 if we want to ensure we return a
+            # full page of results when paginating backwards while data is
+            # being mutated.
             hi = min(position, len(self.data))
             lo = max(hi - limit, 0)
 
