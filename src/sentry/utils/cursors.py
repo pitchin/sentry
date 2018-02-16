@@ -27,6 +27,9 @@ class Cursor(object):
             type(self), self.value, self.offset, int(self.is_prev)
         )
 
+    def __iter__(self):
+        return iter([self.value, self.offset, self.is_prev])
+
     def __nonzero__(self):
         return self.has_results
 

@@ -21,6 +21,7 @@ from sentry.search.django.constants import (
     SQLITE_SORT_CLAUSES
 )
 from sentry.utils.db import get_db_engine
+from sentry.utils.dates import to_timestamp
 
 
 class DjangoSearchBackend(SearchBackend):
@@ -269,11 +270,25 @@ class DjangoSearchBackend(SearchBackend):
         return paginator.get_result(limit, cursor, count_hits=count_hits)
 
 
-sort_expressions = {
-    'priority': 'log(times_seen) * 600 + last_seen::abstime::int',
-    'date': 'last_seen',
-    'new': 'first_seen',
-    'freq': 'times_seen',
+identity = lambda value: value
+
+sort_strategies = {
+    'priority': (
+        'log(times_seen) * 600 + last_seen::abstime::int',
+        identity,
+    ),
+    'date': (
+        'last_seen',
+        lambda score: int(to_timestamp(score) * 1000),
+    ),
+    'new': (
+        'first_seen',
+        lambda score: int(to_timestamp(score) * 1000),
+    ),
+    'freq': (
+        'times_seen',
+        identity,
+    ),
 }
 
 
@@ -282,8 +297,18 @@ from sentry.utils.cursors import Cursor, CursorResult
 
 
 class SequencePaginator(object):
-    def __init__(self, data, reverse=False):
-        self.data = sorted(data, reverse=reverse)
+    def __init__(self, data, value_to_cursor_score, reverse=False):
+        self.data = sorted(
+            map(
+                lambda (score, item): (
+                    value_to_cursor_score(score),
+                    item,
+                ),
+                data,
+            ),
+            reverse=reverse,
+        )
+        self.value_to_cursor_score = value_to_cursor_score
         self.reverse = reverse
 
     def get_result(self, limit, cursor=None):
@@ -291,6 +316,7 @@ class SequencePaginator(object):
             cursor = (None, 0, False)
 
         cursor_score, cursor_offset, cursor_previous = cursor
+
         assert cursor_offset > -1
 
         if cursor_score is None:
@@ -327,16 +353,16 @@ class SequencePaginator(object):
             # TODO: This point could be identified with binary search.
             while prev_score == self.data[lo - prev_offset - 1][0]:
                 prev_offset = prev_offset + 1
-            prev_cursor = (prev_score, prev_offset, True)
+            prev_cursor = (prev_score, prev_offset, True, True)
 
         next_cursor = None
         if hi < len(self.data):
             next_score = self.data[hi][0]
             next_offset = 0
             # TODO: This point could be identified with binary search.
-            while next_score == self.data[hi + next_offset - 1][0]:
+            while hi + next_offset - 1 < len(self.data) and next_score == self.data[hi + next_offset - 1][0]:
                 next_offset = next_offset + 1
-            next_cursor = (next_score, next_offset, False)
+            next_cursor = (next_score, next_offset, False, True)
 
         return CursorResult(
             results,
@@ -417,19 +443,23 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             raise NotImplementedError
         """
 
+        sort_expression, value_to_cursor_score = sort_strategies[sort_by]
+
         result = SequencePaginator(
             self.filter_candidates(
                 project,
                 environment_id,
                 tags,
-                sort_by,
+                sort_expression,
                 candidates=self.find_candidates(
                     project,
                     environment_id,
                     **kwargs
                 ),
                 **kwargs
-            )
+            ),
+            value_to_cursor_score,
+            reverse=True,
         ).get_result(limit, cursor)
 
         # lol
@@ -545,7 +575,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         return set(queryset.values_list('id', flat=True))
 
-    def filter_candidates(self, project, environment_id, tags=None, sort_by='date', **kwargs):
+    def filter_candidates(self, project, environment_id, tags, sort_expression, **kwargs):
         # TODO(tkaemming): This shouldn't be implemented like this, since this
         # is an abstraction leak from tagstore, but it's good enough to prove
         # the point for now.
@@ -576,7 +606,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             ),
             kwargs
         ).extra(select={
-            'sort_key': sort_expressions[sort_by],
+            'sort_key': sort_expression,
         })
 
         candidates = dict(queryset.values_list('group_id', 'sort_key'))
