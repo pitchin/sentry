@@ -38017,35 +38017,38 @@ exports[`projectGeneralSettings renders 1`] = `
                                                             priority="danger"
                                                             title="Remove project?"
                                                           >
-                                                            <Button
-                                                              className="ref-remove-project"
-                                                              disabled={false}
+                                                            <div
                                                               onClick={[Function]}
-                                                              priority="danger"
-                                                              type="button"
                                                             >
-                                                              <button
-                                                                className="ref-remove-project button button-danger"
+                                                              <Button
+                                                                className="ref-remove-project"
                                                                 disabled={false}
-                                                                onClick={[Function]}
-                                                                role="button"
+                                                                priority="danger"
                                                                 type="button"
                                                               >
-                                                                <FlowLayout
-                                                                  truncate={false}
+                                                                <button
+                                                                  className="ref-remove-project button button-danger"
+                                                                  disabled={false}
+                                                                  onClick={[Function]}
+                                                                  role="button"
+                                                                  type="button"
                                                                 >
-                                                                  <div
-                                                                    className="flow-layout"
+                                                                  <FlowLayout
+                                                                    truncate={false}
                                                                   >
-                                                                    <span
-                                                                      className="button-label"
+                                                                    <div
+                                                                      className="flow-layout"
                                                                     >
-                                                                      Remove Project
-                                                                    </span>
-                                                                  </div>
-                                                                </FlowLayout>
-                                                              </button>
-                                                            </Button>
+                                                                      <span
+                                                                        className="button-label"
+                                                                      >
+                                                                        Remove Project
+                                                                      </span>
+                                                                    </div>
+                                                                  </FlowLayout>
+                                                                </button>
+                                                              </Button>
+                                                            </div>
                                                             <Modal
                                                               animation={false}
                                                               autoFocus={true}
@@ -38277,35 +38280,38 @@ exports[`projectGeneralSettings renders 1`] = `
                                                             renderMessage={[Function]}
                                                             title="Transfer project?"
                                                           >
-                                                            <Button
-                                                              className="ref-transfer-project"
-                                                              disabled={false}
+                                                            <div
                                                               onClick={[Function]}
-                                                              priority="danger"
-                                                              type="button"
                                                             >
-                                                              <button
-                                                                className="ref-transfer-project button button-danger"
+                                                              <Button
+                                                                className="ref-transfer-project"
                                                                 disabled={false}
-                                                                onClick={[Function]}
-                                                                role="button"
+                                                                priority="danger"
                                                                 type="button"
                                                               >
-                                                                <FlowLayout
-                                                                  truncate={false}
+                                                                <button
+                                                                  className="ref-transfer-project button button-danger"
+                                                                  disabled={false}
+                                                                  onClick={[Function]}
+                                                                  role="button"
+                                                                  type="button"
                                                                 >
-                                                                  <div
-                                                                    className="flow-layout"
+                                                                  <FlowLayout
+                                                                    truncate={false}
                                                                   >
-                                                                    <span
-                                                                      className="button-label"
+                                                                    <div
+                                                                      className="flow-layout"
                                                                     >
-                                                                      Transfer Project
-                                                                    </span>
-                                                                  </div>
-                                                                </FlowLayout>
-                                                              </button>
-                                                            </Button>
+                                                                      <span
+                                                                        className="button-label"
+                                                                      >
+                                                                        Transfer Project
+                                                                      </span>
+                                                                    </div>
+                                                                  </FlowLayout>
+                                                                </button>
+                                                              </Button>
+                                                            </div>
                                                             <Modal
                                                               animation={false}
                                                               autoFocus={true}
