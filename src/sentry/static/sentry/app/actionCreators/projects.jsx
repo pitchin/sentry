@@ -62,13 +62,13 @@ export function removeProject(api, orgId, project) {
 }
 
 export function transferProject(api, orgId, project, email) {
-  let endpoint = `/projects/${orgId}/${project.slug}/`;
+  let endpoint = `/projects/${orgId}/${project.slug}/transfer/`;
 
   let req = api
     .requestPromise(endpoint, {
-      method: 'DELETE',
+      method: 'POST',
       data: {
-        transfer: email,
+        email,
       },
     })
     .then(
