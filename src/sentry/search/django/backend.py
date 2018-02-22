@@ -524,20 +524,19 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 GroupStatus.PENDING_DELETION,
                 GroupStatus.DELETION_IN_PROGRESS,
                 GroupStatus.PENDING_MERGE,
-            ]),
-            # .extra(
-            #     where=[
-            #         '{} = {}'.format(
-            #             Column(Group, 'id'),
-            #             Column(GroupEnvironment, 'group_id'),
-            #         ),
-            #         '{} = %s'.format(
-            #             Column(GroupEnvironment, 'environment_id'),
-            #         ),
-            #     ],
-            #     params=[environment_id],
-            #     tables=[GroupEnvironment._meta.db_table],
-            # ),
+            ]).extra(
+                where=[
+                    '{} = {}'.format(
+                        Column(Group, 'id'),
+                        Column(GroupEnvironment, 'group_id'),
+                    ),
+                    '{} = %s'.format(
+                        Column(GroupEnvironment, 'environment_id'),
+                    ),
+                ],
+                params=[environment_id],
+                tables=[GroupEnvironment._meta.db_table],
+            ),
             kwargs
         )
 
