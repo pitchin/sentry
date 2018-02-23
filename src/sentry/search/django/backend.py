@@ -406,77 +406,41 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
               limit=None,
               **kwargs
               ):
-        from sentry.models import Environment, Group
+        from sentry.models import Environment, Group, GroupEnvironment, GroupStatus, GroupSubscription, Release
 
-        environment_id = Environment.objects.get(
-            projects=project,
-            name=tags['environment'],
-        ).id
+        # TODO(tkaemming): I'm not sure how to handle ``date_from`` or
+        # ``date_to`` for environment-based searching without an environment
+        # column on ``Event``.
+        assert 'date_from' not in kwargs and 'date_from' not in kwargs
 
-        # TODO(tkaemming): I don't know where this goes?
+        queryset = Group.objects.filter(project=project).exclude(status__in=[
+            GroupStatus.PENDING_DELETION,
+            GroupStatus.DELETION_IN_PROGRESS,
+            GroupStatus.PENDING_MERGE,
+        ])
 
-        """
-        if date_from is not None:
-            raise NotImplementedError
+        if environment_id is not None:
+            assert 'environment' in tags
+            assert Environment.objects.get(
+                projects=project,
+                name=tags['environment'],
+            ).id == environment_id
 
-        if date_to is not None:
-            raise NotImplementedError
-        """
-
-        result = SequencePaginator(
-            self.filter_candidates(
-                project,
-                environment_id,
-                tags,
-                sort_by,
-                candidates=self.find_candidates(
-                    project,
-                    environment_id,
-                    **kwargs
-                ),
-                **kwargs
-            ),
-            reverse=True,
-        ).get_result(limit, cursor)
-
-        # lol
-        result.results = filter(
-            None,
-            map(
-                Group.objects.in_bulk(result.results).get,
-                result.results,
-            ),
-        )
-
-        return result
-
-    def find_candidates(self, project, environment_id, **kwargs):
-        # TODO(tkaemming): If no filters are provided it might make sense to
-        # return from this method without making a query, letting the query run
-        # unrestricted in `filter_candidates`.
-
-        from sentry.models import Group, GroupEnvironment, GroupSubscription, GroupStatus, Release
+            queryset = queryset.extra(
+                where=[
+                    '{} = {}'.format(
+                        Column(Group, 'id'),
+                        Column(GroupEnvironment, 'group_id'),
+                    ),
+                    '{} = %s'.format(
+                        Column(GroupEnvironment, 'environment_id'),
+                    ),
+                ],
+                params=[environment_id],
+                tables=[GroupEnvironment._meta.db_table],
+            )
 
         queryset = QueryBuilder({
-            'first_release': (
-                lambda queryset, version: queryset.extra(
-                    where=[
-                        '{} = {}'.format(
-                            Column(GroupEnvironment, 'first_release_id'),
-                            Column(Release, 'id'),
-                        ),
-                        '{} = %s'.format(
-                            Column(Release, 'organization'),
-                        ),
-                        '{} = %s'.format(
-                            Column(Release, 'version'),
-                        ),
-                    ],
-                    params=[project.organization_id, version],
-                    tables=[Release._meta.db_table],
-                ),
-                [],
-            ),
             'query': (
                 lambda queryset, query: queryset.filter(
                     Q(message__icontains=query) | Q(culprit__icontains=query),
@@ -519,76 +483,96 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             ),
             'active_at_from': scalar('active_at_from', 'active_at', 'gt'),
             'active_at_to': scalar('active_at_to', 'active_at', 'lt'),
-        }).build(
-            Group.objects.filter(project=project).exclude(status__in=[
-                GroupStatus.PENDING_DELETION,
-                GroupStatus.DELETION_IN_PROGRESS,
-                GroupStatus.PENDING_MERGE,
-            ]).extra(
-                where=[
-                    '{} = {}'.format(
-                        Column(Group, 'id'),
-                        Column(GroupEnvironment, 'group_id'),
+        }).build(queryset, kwargs)
+
+        if environment_id is not None:
+            # TODO(tkaemming): This queryset should probably have a limit
+            # associated with it? If there is one, it should be greater than (or
+            # equal to) the "maximum hits" number if we want that to reflect a
+            # realistic estimate.
+
+            queryset = QueryBuilder({
+                'first_release': (
+                    lambda queryset, version: queryset.extra(
+                        where=[
+                            '{} = {}'.format(
+                                Column(GroupEnvironment, 'first_release_id'),
+                                Column(Release, 'id'),
+                            ),
+                            '{} = %s'.format(
+                                Column(Release, 'organization'),
+                            ),
+                            '{} = %s'.format(
+                                Column(Release, 'version'),
+                            ),
+                        ],
+                        params=[project.organization_id, version],
+                        tables=[Release._meta.db_table],
                     ),
-                    '{} = %s'.format(
-                        Column(GroupEnvironment, 'environment_id'),
+                    [],
+                ),
+            }).build(queryset, kwargs).values_list('id', flat=True)
+
+            from sentry.search.base import ANY
+            from sentry.tagstore.models import GroupTagKey, GroupTagValue
+
+            # TODO(tkaemming): This shouldn't be implemented like this, since this
+            # is an abstraction leak from tagstore, but it's good enough to prove
+            # the point for now.
+
+            queryset = QueryBuilder({
+                'age_from': scalar('age_from', 'first_seen', 'gt'),
+                'age_to': scalar('age_to', 'first_seen', 'lt'),
+                'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
+                'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
+                'times_seen': (
+                    lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
+                    [],
+                ),
+                'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
+                'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
+            }).build(
+                GroupTagValue.objects.filter(
+                    project_id=project.id,
+                    key='environment',
+                    value=tags.pop('environment'),
+                    group_id__in=set(queryset),  # XXX: Some sort of table aliasing issue here?
+                ),
+                kwargs,
+            )
+        else:
+            queryset = QueryBuilder({
+                'first_release': (
+                    lambda queryset, version: queryset.filter(
+                        first_release__organization_id=project.organization_id,
+                        first_release__version=version,
                     ),
-                ],
-                params=[environment_id],
-                tables=[GroupEnvironment._meta.db_table],
-            ),
-            kwargs
-        )
-
-        # TODO(tkaemming): This shoould also utilize some of the scalar
-        # attributes from `find_candidates` to rule out entries that are
-        # impossible based on aggregate attributes (e.g. an issue cannot be
-        # seen in an environment after the issue's last seen timestamp.)
-
-        # TODO(tkaemming): This queryset should probably have a limit
-        # associated with it? If there is one, it should be greater than (or
-        # equal to) the "maximum hits" number if we want that to reflect a
-        # realistic estimate.
-
-        return set(queryset.values_list('id', flat=True))
-
-    def filter_candidates(self, project, environment_id, tags, sort_by, **kwargs):
-        # TODO(tkaemming): This shouldn't be implemented like this, since this
-        # is an abstraction leak from tagstore, but it's good enough to prove
-        # the point for now.
-
-        from sentry.search.base import ANY
-        from sentry.tagstore.models import GroupTagKey, GroupTagValue
+                    [],
+                ),
+                'age_from': scalar('age_from', 'first_seen', 'gt'),
+                'age_to': scalar('age_to', 'first_seen', 'lt'),
+                'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
+                'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
+                'times_seen': (
+                    lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
+                    [],
+                ),
+                'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
+                'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
+            }).build(queryset, kwargs)
 
         sort_expression, value_to_cursor_score = sort_strategies[sort_by]
 
-        queryset = QueryBuilder({
-            'candidates': (
-                lambda queryset, candidates: queryset.filter(group_id__in=candidates),
-                [],
-            ),
-            'age_from': scalar('age_from', 'first_seen', 'gt'),
-            'age_to': scalar('age_to', 'first_seen', 'lt'),
-            'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
-            'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
-            'times_seen': (
-                lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
-                [],
-            ),
-            'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
-            'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
-        }).build(
-            GroupTagValue.objects.filter(
-                project_id=project.id,
-                key='environment',
-                value=tags.pop('environment'),
-            ),
-            kwargs
-        ).extra(select={
-            'sort_key': sort_expression,
-        })
+        queryset = queryset.extra(
+            select={
+                'sort_key': sort_expression,
+            },
+        )
 
-        candidates = dict(queryset.values_list('group_id', 'sort_key'))
+        if environment_id is not None:
+            candidates = dict(queryset.values_list('group_id', 'sort_key'))
+        else:
+            candidates = dict(queryset.values_list('id', 'sort_key'))
 
         # TODO: Sort the remaining tags by estimated selectivity to try and
         # make this as efficient as possible.
@@ -608,10 +592,20 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
 
-        return map(
-            lambda (id, score): (
-                value_to_cursor_score(score),
-                id,
+        result = SequencePaginator(
+            map(
+                lambda (id, score): (value_to_cursor_score(score), id),
+                candidates.items(),
             ),
-            candidates.items(),
+            reverse=True,
+        ).get_result(limit, cursor)
+
+        result.results = filter(
+            None,
+            map(
+                Group.objects.in_bulk(result.results).get,
+                result.results,
+            ),
         )
+
+        return result
