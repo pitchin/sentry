@@ -558,16 +558,16 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
 
         sort_expression, value_to_cursor_score = sort_strategies[sort_by]
 
-        queryset = queryset.extra(
-            select={
-                'sort_key': sort_expression,
-            },
+        candidates = dict(
+            queryset.extra(
+                select={
+                    'sort_key': sort_expression,
+                },
+            ).values_list(
+                'group_id' if environment_id is not None else 'id',
+                'sort_key',
+            )
         )
-
-        if environment_id is not None:
-            candidates = dict(queryset.values_list('group_id', 'sort_key'))
-        else:
-            candidates = dict(queryset.values_list('id', 'sort_key'))
 
         # TODO: Sort the remaining tags by estimated selectivity to try and
         # make this as efficient as possible.
