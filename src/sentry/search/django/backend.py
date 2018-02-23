@@ -353,8 +353,12 @@ class SequencePaginator(object):
         )
 
 
-def scalar(parameter, field, operator):
-    return (
+def condition(callback, fields=None):
+    return (callback, fields or [])
+
+
+def scalar_condition(parameter, field, operator):
+    return condition(
         lambda queryset, value, inclusive: queryset.filter(**{
             '{}__{}{}'.format(
                 field,
@@ -413,11 +417,51 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # column on ``Event``.
         assert 'date_from' not in kwargs and 'date_from' not in kwargs
 
-        queryset = Group.objects.filter(project=project).exclude(status__in=[
-            GroupStatus.PENDING_DELETION,
-            GroupStatus.DELETION_IN_PROGRESS,
-            GroupStatus.PENDING_MERGE,
-        ])
+        queryset = QueryBuilder({
+            'query': condition(
+                lambda queryset, query: queryset.filter(
+                    Q(message__icontains=query) | Q(culprit__icontains=query),
+                ) if query else queryset,
+            ),
+            'status': condition(
+                lambda queryset, status: queryset.filter(status=status),
+            ),
+            'bookmarked_by': condition(
+                lambda queryset, user: queryset.filter(
+                    bookmark_set__project=project,
+                    bookmark_set__user=user,
+                ),
+            ),
+            'assigned_to': condition(
+                lambda queryset, user: queryset.filter(
+                    assignee_set__project=project,
+                    assignee_set__user=user,
+                ),
+            ),
+            'unassigned': condition(
+                lambda queryset, unassigned: queryset.filter(
+                    assignee_set__isnull=unassigned,
+                ),
+            ),
+            'subscribed_by': condition(
+                lambda queryset, user: queryset.filter(
+                    id__in=GroupSubscription.objects.filter(
+                        project=project,
+                        user=user,
+                        is_active=True,
+                    ).values_list('group'),
+                ),
+            ),
+            'active_at_from': scalar_condition('active_at_from', 'active_at', 'gt'),
+            'active_at_to': scalar_condition('active_at_to', 'active_at', 'lt'),
+        }).build(
+            Group.objects.filter(project=project).exclude(status__in=[
+                GroupStatus.PENDING_DELETION,
+                GroupStatus.DELETION_IN_PROGRESS,
+                GroupStatus.PENDING_MERGE,
+            ]),
+            kwargs,
+        )
 
         if environment_id is not None:
             assert 'environment' in tags
@@ -426,73 +470,13 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 name=tags['environment'],
             ).id == environment_id
 
-            queryset = queryset.extra(
-                where=[
-                    '{} = {}'.format(
-                        Column(Group, 'id'),
-                        Column(GroupEnvironment, 'group_id'),
-                    ),
-                    '{} = %s'.format(
-                        Column(GroupEnvironment, 'environment_id'),
-                    ),
-                ],
-                params=[environment_id],
-                tables=[GroupEnvironment._meta.db_table],
-            )
-
-        queryset = QueryBuilder({
-            'query': (
-                lambda queryset, query: queryset.filter(
-                    Q(message__icontains=query) | Q(culprit__icontains=query),
-                ) if query else queryset,
-                [],
-            ),
-            'status': (
-                lambda queryset, status: queryset.filter(status=status),
-                [],
-            ),
-            'bookmarked_by': (
-                lambda queryset, user: queryset.filter(
-                    bookmark_set__project=project,
-                    bookmark_set__user=user,
-                ),
-                [],
-            ),
-            'assigned_to': (
-                lambda queryset, user: queryset.filter(
-                    assignee_set__project=project,
-                    assignee_set__user=user,
-                ),
-                [],
-            ),
-            'unassigned': (
-                lambda queryset, unassigned: queryset.filter(
-                    assignee_set__isnull=unassigned,
-                ),
-                [],
-            ),
-            'subscribed_by': (
-                lambda queryset, user: queryset.filter(
-                    id__in=GroupSubscription.objects.filter(
-                        project=project,
-                        user=user,
-                        is_active=True,
-                    ).values_list('group'),
-                ),
-                [],
-            ),
-            'active_at_from': scalar('active_at_from', 'active_at', 'gt'),
-            'active_at_to': scalar('active_at_to', 'active_at', 'lt'),
-        }).build(queryset, kwargs)
-
-        if environment_id is not None:
             # TODO(tkaemming): This queryset should probably have a limit
             # associated with it? If there is one, it should be greater than (or
             # equal to) the "maximum hits" number if we want that to reflect a
             # realistic estimate.
 
             queryset = QueryBuilder({
-                'first_release': (
+                'first_release': condition(
                     lambda queryset, version: queryset.extra(
                         where=[
                             '{} = {}'.format(
@@ -509,9 +493,23 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                         params=[project.organization_id, version],
                         tables=[Release._meta.db_table],
                     ),
-                    [],
                 ),
-            }).build(queryset, kwargs).values_list('id', flat=True)
+            }).build(
+                queryset.extra(
+                    where=[
+                        '{} = {}'.format(
+                            Column(Group, 'id'),
+                            Column(GroupEnvironment, 'group_id'),
+                        ),
+                        '{} = %s'.format(
+                            Column(GroupEnvironment, 'environment_id'),
+                        ),
+                    ],
+                    params=[environment_id],
+                    tables=[GroupEnvironment._meta.db_table],
+                ),
+                kwargs,
+            ).values_list('id', flat=True)
 
             from sentry.search.base import ANY
             from sentry.tagstore.models import GroupTagKey, GroupTagValue
@@ -521,44 +519,41 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
             # the point for now.
 
             queryset = QueryBuilder({
-                'age_from': scalar('age_from', 'first_seen', 'gt'),
-                'age_to': scalar('age_to', 'first_seen', 'lt'),
-                'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
-                'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
-                'times_seen': (
+                'age_from': scalar_condition('age_from', 'first_seen', 'gt'),
+                'age_to': scalar_condition('age_to', 'first_seen', 'lt'),
+                'last_seen_from': scalar_condition('last_seen_from', 'last_seen', 'gt'),
+                'last_seen_to': scalar_condition('last_seen_to', 'last_seen', 'lt'),
+                'times_seen': condition(
                     lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
-                    [],
                 ),
-                'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
-                'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
+                'times_seen_lower': scalar_condition('times_seen_lower', 'times_seen', 'gt'),
+                'times_seen_upper': scalar_condition('times_seen_upper', 'times_seen', 'lt'),
             }).build(
                 GroupTagValue.objects.filter(
                     project_id=project.id,
                     key='environment',
-                    value=tags.pop('environment'),
+                    value=tags['environment'],
                     group_id__in=set(queryset),  # XXX: Some sort of table aliasing issue here?
                 ),
                 kwargs,
             )
         else:
             queryset = QueryBuilder({
-                'first_release': (
+                'first_release': condition(
                     lambda queryset, version: queryset.filter(
                         first_release__organization_id=project.organization_id,
                         first_release__version=version,
                     ),
-                    [],
                 ),
-                'age_from': scalar('age_from', 'first_seen', 'gt'),
-                'age_to': scalar('age_to', 'first_seen', 'lt'),
-                'last_seen_from': scalar('last_seen_from', 'last_seen', 'gt'),
-                'last_seen_to': scalar('last_seen_to', 'last_seen', 'lt'),
-                'times_seen': (
+                'age_from': scalar_condition('age_from', 'first_seen', 'gt'),
+                'age_to': scalar_condition('age_to', 'first_seen', 'lt'),
+                'last_seen_from': scalar_condition('last_seen_from', 'last_seen', 'gt'),
+                'last_seen_to': scalar_condition('last_seen_to', 'last_seen', 'lt'),
+                'times_seen': condition(
                     lambda queryset, times_seen: queryset.filter(times_seen=times_seen),
-                    [],
                 ),
-                'times_seen_lower': scalar('times_seen_lower', 'times_seen', 'gt'),
-                'times_seen_upper': scalar('times_seen_upper', 'times_seen', 'lt'),
+                'times_seen_lower': scalar_condition('times_seen_lower', 'times_seen', 'gt'),
+                'times_seen_upper': scalar_condition('times_seen_upper', 'times_seen', 'lt'),
             }).build(queryset, kwargs)
 
         sort_expression, value_to_cursor_score = sort_strategies[sort_by]
