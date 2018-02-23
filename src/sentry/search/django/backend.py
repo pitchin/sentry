@@ -417,6 +417,8 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
         # column on ``Event``.
         assert 'date_from' not in kwargs and 'date_from' not in kwargs
 
+        sort_expression, value_to_cursor_score = sort_strategies[sort_by]
+
         queryset = QueryBuilder({
             'query': condition(
                 lambda queryset, query: queryset.filter(
@@ -536,7 +538,51 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                     group_id__in=set(queryset),  # XXX: Some sort of table aliasing issue here?
                 ),
                 kwargs,
+            ).extra(
+                select={
+                    'sort_key': sort_expression,
+                },
             )
+
+            candidates = dict(queryset.values_list('group_id', 'sort_key'))
+
+            # TODO: Sort the remaining tags by estimated selectivity to try and
+            # make this as efficient as possible.
+            for key, value in tags.items():
+                if value is ANY:
+                    queryset = GroupTagKey.objects.filter(
+                        key=key,
+                        group_id__in=candidates.keys(),
+                    )
+                else:
+                    # TODO: If this ends up with a limit applied to it, it should
+                    # also sort by the `sort_expression`.
+                    queryset = GroupTagValue.objects.filter(
+                        key=key,
+                        value=value,
+                        group_id__in=candidates.keys(),
+                    )
+
+                for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
+                    del candidates[id]
+
+            result = SequencePaginator(
+                map(
+                    lambda (id, score): (value_to_cursor_score(score), id),
+                    candidates.items(),
+                ),
+                reverse=True,
+            ).get_result(limit, cursor)
+
+            result.results = filter(
+                None,
+                map(
+                    Group.objects.in_bulk(result.results).get,
+                    result.results,
+                ),
+            )
+
+            return result
         else:
             queryset = QueryBuilder({
                 'first_release': condition(
@@ -554,55 +600,56 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 ),
                 'times_seen_lower': scalar_condition('times_seen_lower', 'times_seen', 'gt'),
                 'times_seen_upper': scalar_condition('times_seen_upper', 'times_seen', 'lt'),
-            }).build(queryset, kwargs)
-
-        sort_expression, value_to_cursor_score = sort_strategies[sort_by]
-
-        candidates = dict(
-            queryset.extra(
-                select={
-                    'sort_key': sort_expression,
-                },
-            ).values_list(
-                'group_id' if environment_id is not None else 'id',
-                'sort_key',
+            }).build(
+                queryset,
+                kwargs,
             )
-        )
 
-        # TODO: Sort the remaining tags by estimated selectivity to try and
-        # make this as efficient as possible.
-        for key, value in tags.items():
-            if value is ANY:
-                queryset = GroupTagKey.objects.filter(
-                    key=key,
-                    group_id__in=candidates.keys(),
+            if tags:
+                matches = tagstore.get_group_ids_for_search_filter(project.id, environment_id, tags)
+                if not matches:
+                    return queryset.none()
+                queryset = queryset.filter(
+                    id__in=matches,
                 )
+
+            engine = get_db_engine('default')
+
+            if engine.startswith('sqlite'):
+                score_clause = SQLITE_SORT_CLAUSES[sort_by]
+            elif engine.startswith('mysql'):
+                score_clause = MYSQL_SORT_CLAUSES[sort_by]
+            elif engine.startswith('oracle'):
+                score_clause = ORACLE_SORT_CLAUSES[sort_by]
+            elif engine in MSSQL_ENGINES:
+                score_clause = MSSQL_SORT_CLAUSES[sort_by]
             else:
-                # TODO: If this ends up with a limit applied to it, it should
-                # also sort by the `sort_expression`.
-                queryset = GroupTagValue.objects.filter(
-                    key=key,
-                    value=value,
-                    group_id__in=candidates.keys(),
-                )
+                score_clause = SORT_CLAUSES[sort_by]
 
-            for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
-                del candidates[id]
+            queryset = queryset.extra(
+                select={'sort_value': score_clause},
+            )
 
-        result = SequencePaginator(
-            map(
-                lambda (id, score): (value_to_cursor_score(score), id),
-                candidates.items(),
-            ),
-            reverse=True,
-        ).get_result(limit, cursor)
+            # HACK: don't sort by the same column twice
+            if sort_by == 'date':
+                paginator_cls = DateTimePaginator
+                sort_clause = '-last_seen'
+            elif sort_by == 'priority':
+                paginator_cls = Paginator
+                sort_clause = '-score'
+            elif sort_by == 'new':
+                paginator_cls = DateTimePaginator
+                sort_clause = '-first_seen'
+            elif sort_by == 'freq':
+                paginator_cls = Paginator
+                sort_clause = '-times_seen'
+            else:
+                paginator_cls = Paginator
+                sort_clause = '-sort_value'
 
-        result.results = filter(
-            None,
-            map(
-                Group.objects.in_bulk(result.results).get,
-                result.results,
-            ),
-        )
-
-        return result
+            queryset = queryset.order_by(sort_clause)
+            paginator = paginator_cls(
+                queryset,
+                sort_clause,
+                **paginator_options if paginator_options is not None else {})
+            return paginator.get_result(limit, cursor, count_hits=count_hits)
