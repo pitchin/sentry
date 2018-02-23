@@ -582,7 +582,11 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                     key=key,
                     value=value,
                     group_id__in=candidates.keys(),
-                )
+                ).extra(
+                    select={
+                        'sort_key': sort_expression,
+                    },
+                ).order_by('sort_key')
 
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
