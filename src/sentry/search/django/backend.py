@@ -532,7 +532,7 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                 GroupTagValue.objects.filter(
                     project_id=project.id,
                     key='environment',
-                    value=tags['environment'],
+                    value=tags.pop('environment'),  # avoid filtering again on this later
                     group_id__in=set(queryset),  # XXX: Some sort of table aliasing issue here?
                 ),
                 kwargs,
@@ -578,15 +578,13 @@ class EnvironmentDjangoSearchBackend(SearchBackend):
                     group_id__in=candidates.keys(),
                 )
             else:
+                # TODO: If this ends up with a limit applied to it, it should
+                # also sort by the `sort_expression`.
                 queryset = GroupTagValue.objects.filter(
                     key=key,
                     value=value,
                     group_id__in=candidates.keys(),
-                ).extra(
-                    select={
-                        'sort_key': sort_expression,
-                    },
-                ).order_by('sort_key')
+                )
 
             for id in set(candidates) - set(queryset.values_list('group_id', flat=True)):
                 del candidates[id]
