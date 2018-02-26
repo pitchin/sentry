@@ -398,6 +398,7 @@ window.TestStubs = {
       name: 'GitHub',
       config: [],
       setupUri: '/github-integration-setup-uri/',
+      metadata: {},
       ...params,
     };
   },
