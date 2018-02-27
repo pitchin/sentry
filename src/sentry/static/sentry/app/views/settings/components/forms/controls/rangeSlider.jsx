@@ -2,6 +2,8 @@ import PropTypes from 'prop-types';
 import React from 'react';
 import styled from 'react-emotion';
 
+import {t} from '../../../../../locale';
+
 const Slider = styled.input`
   -webkit-appearance: none;
   width: 100%;
@@ -173,13 +175,13 @@ class RangeSlider extends React.Component {
 
   handleInput = e => {
     let sliderValue = parseInt(e.target.value, 10);
-    let value = this.getActualValue(sliderValue);
 
     this.setState({
       sliderValue,
     });
 
     if (this.props.onChange) {
+      let value = this.getActualValue(sliderValue);
       this.props.onChange(value, e);
     }
   };
@@ -195,7 +197,8 @@ class RangeSlider extends React.Component {
       min = 0;
       max = allowedValues.length - 1;
       actualValue = allowedValues[sliderValue];
-      displayValue = typeof actualValue !== 'undefined' ? actualValue : 'Invalid value';
+      displayValue =
+        typeof actualValue !== 'undefined' ? actualValue : t('Invalid value');
     }
 
     displayValue =
