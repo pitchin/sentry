@@ -268,7 +268,7 @@ def alert(request):
             'tags':
             event.get_tags(),
             'project_label':
-            project.name,
+            project.slug,
             'tags': [
                 ('logger', 'javascript'), ('environment', 'prod'), ('level', 'error'),
                 ('device', 'Other')
