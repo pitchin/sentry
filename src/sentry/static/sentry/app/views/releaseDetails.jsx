@@ -130,7 +130,7 @@ const ReleaseDetails = createReactClass({
                 <div className="release-stats">
                   <h6 className="nav-header">{t('New Issues')}</h6>
                   <span className="stream-count">
-                    <Count value={release.newGroups} />
+                    <Count value={release.newIssues} />
                   </span>
                 </div>
               </div>
