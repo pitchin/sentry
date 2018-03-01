@@ -14,7 +14,7 @@ from django.db import router
 from django.db.models import Q
 
 from sentry import tagstore
-from sentry.api.paginator import DateTimePaginator, Paginator
+from sentry.api.paginator import DateTimePaginator, Paginator, SequencePaginator
 from sentry.search.base import EMPTY, SearchBackend
 from sentry.search.django.constants import (
     MSSQL_ENGINES, MSSQL_SORT_CLAUSES, MYSQL_SORT_CLAUSES, ORACLE_SORT_CLAUSES, SORT_CLAUSES,
@@ -276,81 +276,6 @@ sort_strategies = {
     'new': ('first_seen', lambda score: int(to_timestamp(score) * 1000)),
     'freq': ('times_seen', int),
 }
-
-
-import operator
-from sentry.utils.cursors import Cursor, CursorResult
-
-
-class SequencePaginator(object):
-    def __init__(self, data, reverse=False):
-        self.data = sorted(data, reverse=reverse)
-        self.reverse = reverse
-
-    def get_result(self, limit, cursor=None):
-        if cursor is None:
-            cursor = (None, 0, False)
-
-        cursor_score, cursor_offset, cursor_previous = cursor
-
-        assert cursor_offset > -1
-
-        if cursor_score is None:
-            position = 0 if not cursor_previous else len(self.data)
-        else:
-            position = 0
-            # TODO: This point could be identified with binary search.
-            predicate = operator.ge if not self.reverse else operator.le
-            while position < len(self.data):
-                score, value = self.data[position]
-                if predicate(score, cursor_score):
-                    break
-                else:
-                    position = position + 1
-
-        position = position + cursor_offset
-
-        if not cursor_previous:
-            lo = max(position, 0)
-            hi = min(lo + limit, len(self.data))
-        else:
-            # TODO: It might make sense to ensure that this hi value is at
-            # least the length of the page + 1 if we want to ensure we return a
-            # full page of results when paginating backwards while data is
-            # being mutated.
-            hi = min(position, len(self.data))
-            lo = max(hi - limit, 0)
-
-        results = map(
-            lambda (score, item): item,
-            self.data[lo:hi],
-        )
-
-        prev_cursor = None
-        if lo > 0:
-            prev_score = self.data[lo][0]
-            prev_offset = 0
-            # TODO: This point could be identified with binary search.
-            while lo - prev_offset - 1 > -1 and prev_score == self.data[lo - prev_offset - 1][0]:
-                prev_offset = prev_offset + 1
-            prev_cursor = (prev_score, prev_offset, True, True)
-
-        next_cursor = None
-        if hi < len(self.data):
-            next_score = self.data[hi][0]
-            # TODO: This point could be identified with binary search.
-            next_offset = 0
-            while hi - next_offset - 1 > -1 and next_score == self.data[hi - next_offset - 1][0]:
-                next_offset = next_offset + 1
-            next_cursor = (next_score, next_offset, False, True)
-
-        return CursorResult(
-            results,
-            prev=Cursor(*prev_cursor) if prev_cursor is not None else None,
-            next=Cursor(*next_cursor) if next_cursor is not None else None,
-            hits=len(self.data),
-            max_hits=1000,  # XXX
-        )
 
 
 def condition(callback, fields=None):
