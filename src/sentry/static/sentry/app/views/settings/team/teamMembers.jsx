@@ -166,15 +166,15 @@ const TeamMembers = createReactClass({
     }
 
     let existingMembers = new Set(this.state.teamMemberList.map(member => member.id));
-    let items = [];
-    (this.state.orgMemberList || []).forEach(member => {
-      if (!existingMembers.has(member.id)) {
-        items.push({
-          value: member.id,
-          label: member.name || member.email,
-        });
-      }
-    });
+
+    let items = (this.state.orgMemberList || [])
+      .filter(m => !existingMembers.has(m.id))
+      .map(m => {
+        return {
+          value: m.id,
+          label: m.name || m.email,
+        };
+      });
 
     return (
       <DropdownAutoComplete items={items} onSelect={this.addTeamMember}>
