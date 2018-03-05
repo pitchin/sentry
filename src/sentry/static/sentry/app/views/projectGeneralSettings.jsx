@@ -160,7 +160,7 @@ export default class ProjectGeneralSettings extends AsyncView {
             priority="danger"
             title={`${t('Transfer project')}?`}
             confirmText={t('Transfer project')}
-            renderMessage={({doConfirm, doClose}) => (
+            renderMessage={({confirm}) => (
               <div>
                 <TextBlock>
                   <strong>
@@ -179,7 +179,7 @@ export default class ProjectGeneralSettings extends AsyncView {
                     onFieldChange={this.handleTransferFieldChange}
                     onSubmit={(data, onSuccess, onError, e) => {
                       e.stopPropagation();
-                      doConfirm();
+                      confirm();
                     }}
                   >
                     <TextField
