@@ -47,6 +47,10 @@ export default class ProjectGeneralSettings extends AsyncView {
     return [['data', `/projects/${orgId}/${projectId}/`]];
   }
 
+  handleTransferFieldChange = (id, value) => {
+    this._form[id] = value;
+  };
+
   handleRemoveProject = () => {
     let {orgId} = this.props.params;
     let project = this.state.data;
@@ -69,6 +73,7 @@ export default class ProjectGeneralSettings extends AsyncView {
       window.location.assign('/');
     });
   };
+
   renderRemoveProject() {
     let project = this.state.data;
 
